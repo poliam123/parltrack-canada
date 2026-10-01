@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% from "_card.html" import bill_card %}
+
+{% block title %}Passed bills | ParlTrack Canada{% endblock %}
+
+{% block intro %}The {{ bills|length }} most recent bills to receive royal assent in the current session.{% endblock %}
+
+{% block content %}
+  {% if bills and approximate %}
+  <div class="mb-4 rounded-lg border-l-4 border-ink-600 bg-white p-4 text-sm text-ink-800 shadow-sm">
+    Some royal assent dates were missing from the feed, so this order is approximate and may not be the exact 10 most recent.
+  </div>
+  {% endif %}
+
+  {% if bills %}
+  <ol class="space-y-4">
+    {% for bill in bills %}
+    <li>{{ bill_card(bill, stages) }}</li>
+    {% endfor %}
+  </ol>
+  {% elif not warning %}
+  <div class="rounded-lg bg-white p-5 text-sm text-ink-800 shadow-sm ring-1 ring-ink-200">
+    <p class="font-semibold">No bills with royal assent found.</p>
+    <p class="mt-1 text-ink-600">Reload the page to fetch the feed again, or open /debug to see which statuses the feed contains.</p>
+  </div>
+  {% endif %}
+{% endblock %}

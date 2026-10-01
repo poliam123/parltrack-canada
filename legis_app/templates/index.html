@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% from "_card.html" import bill_card %}
+
+{% block title %}Active bills | ParlTrack Canada{% endblock %}
+
+{% block intro %}The {{ bills|length }} most recently active bills still moving through the current session.{% endblock %}
+
+{% block content %}
+  {% if bills %}
+  <ol class="space-y-4">
+    {% for bill in bills %}
+    <li>{{ bill_card(bill, stages) }}</li>
+    {% endfor %}
+  </ol>
+  {% elif not warning %}
+  <div class="rounded-lg bg-white p-5 text-sm text-ink-800 shadow-sm ring-1 ring-ink-200">
+    <p class="font-semibold">No active bills found.</p>
+    <p class="mt-1 text-ink-600">Reload the page to fetch the feed again, or open /debug to check what LEGISinfo returned.</p>
+  </div>
+  {% endif %}
+{% endblock %}
