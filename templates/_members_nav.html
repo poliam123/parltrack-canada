@@ -1,0 +1,7 @@
+<nav aria-label="Parliament directory" class="mb-5 inline-flex rounded-full bg-ink-100 p-1 text-sm font-semibold">
+  {% for key, label, endpoint in (('house', 'House of Commons', 'members_page'), ('senate', 'Senate', 'senate_page'), ('committees', 'Committees', 'committees_page')) %}
+  <a href="{{ url_for(endpoint) }}" {% if section == key %}aria-current="page"{% endif %}
+     class="rounded-full px-4 py-1.5 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink-800
+            {{ 'bg-paper text-ink-900 shadow-sm' if section == key else 'text-ink-600 hover:text-ink-900' }}">{{ label }}</a>
+  {% endfor %}
+</nav>

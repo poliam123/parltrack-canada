@@ -147,7 +147,7 @@
         <p class="mt-1 text-ink-600">Parliament's site didn't answer in time. Reload this page in a few minutes to try again.</p>
       </div>
     {% else %}
-      <div class="rounded-lg bg-ink-50 p-4 ring-1 ring-inset ring-ink-200" id="party-pending" aria-live="polite">
+      <div class="rounded-lg bg-ink-50 p-4 ring-1 ring-inset ring-ink-200" id="party-pending" data-url="{{ url_for('stats_parties_api') }}" aria-live="polite">
         <p class="text-sm font-semibold text-ink-800">Building this chart&hellip;</p>
         <p class="mt-1 text-sm text-ink-600">
           Each bill's sponsor has to be looked up on Parliament's site. This takes about a minute the first time,
@@ -329,30 +329,4 @@
 
 </div>
 
-{% if not party and party_status != 'error' %}
-<script>
-  // Checks on the party chart every few seconds and reloads once it is ready.
-  (function () {
-    var bar = document.getElementById('party-bar');
-    var count = document.getElementById('party-count');
-    var tries = 0;
-    function poll() {
-      tries++;
-      fetch('{{ url_for("stats_parties_api") }}', { headers: { 'Accept': 'application/json' } })
-        .then(function (r) { return r.json(); })
-        .then(function (d) {
-          if (d.ready && d.status !== 'running') { location.reload(); return; }
-          if (d.status === 'error') { location.reload(); return; }
-          if (d.total) {
-            bar.style.width = Math.max(4, Math.round(d.done / d.total * 100)) + '%';
-            count.textContent = d.done + ' of ' + d.total + ' bills checked';
-          }
-          if (tries < 100) { setTimeout(poll, 3000); }
-        })
-        .catch(function () { if (tries < 100) { setTimeout(poll, 5000); } });
-    }
-    setTimeout(poll, 1500);
-  })();
-</script>
-{% endif %}
 {% endblock %}

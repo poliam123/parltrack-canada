@@ -6,6 +6,7 @@
 {% block intro %}Every sitting MP in the House of Commons, grouped by party. Search by name or riding, or find your own MP by postal code.{% endblock %}
 
 {% block content %}
+{% include "_members_nav.html" %}
 {% if error %}
 <div class="rounded-2xl bg-paper p-5 text-sm text-ink-800 shadow-sm ring-1 ring-ink-200" role="alert">
   <p class="font-semibold">The member list couldn't be loaded.</p>
@@ -70,7 +71,7 @@
   </nav>
 
   <p class="mt-4 flex flex-wrap items-center justify-between gap-2 text-xs text-ink-500">
-    <span id="member-status" aria-live="polite">Showing {{ member_total }} of {{ member_total }} MPs</span>
+    <span id="member-status" data-noun="MPs" aria-live="polite">Showing {{ member_total }} of {{ member_total }} MPs</span>
     <a href="{{ export_url }}" download class="inline-flex items-center gap-1 text-ink-600 hover:text-ink-900">
       <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0l-4-4m4 4l4-4M5 20h14"/></svg>Spreadsheet
     </a>
@@ -102,52 +103,4 @@
   <svg class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M10 15a1 1 0 0 1-1-1V7.4L6.7 9.7a1 1 0 0 1-1.4-1.4l4-4a1 1 0 0 1 1.4 0l4 4a1 1 0 1 1-1.4 1.4L11 7.4V14a1 1 0 0 1-1 1z" clip-rule="evenodd"/></svg>
 </button>
 {% endif %}
-{% endblock %}
-
-{% block scripts %}
-<script>
-  (function () {
-    var input = document.getElementById('member-q');
-    if (!input) { return; }
-    var province = document.getElementById('member-province');
-    var status = document.getElementById('member-status');
-    var empty = document.getElementById('member-empty');
-    var sections = Array.prototype.slice.call(document.querySelectorAll('[data-party-section]'));
-    var total = document.querySelectorAll('[data-member]').length;
-
-    function plain(s) { return s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase(); }
-
-    function apply() {
-      var term = plain(input.value.trim()), prov = province.value, shown = 0;
-      sections.forEach(function (sec) {
-        var any = 0;
-        Array.prototype.forEach.call(sec.querySelectorAll('[data-member]'), function (li) {
-          var ok = (!term || li.getAttribute('data-search').indexOf(term) !== -1) &&
-                   (!prov || li.getAttribute('data-province') === prov);
-          li.classList.toggle('hidden', !ok);
-          if (ok) { any++; shown++; }
-        });
-        sec.classList.toggle('hidden', !any);
-        sec.querySelector('[data-count]').textContent = any;
-        var chip = document.querySelector('[data-chip="' + sec.id.replace('party-', '') + '"]');
-        if (chip) {
-          chip.querySelector('[data-chip-count]').textContent = any;
-          chip.classList.toggle('opacity-40', !any);
-        }
-      });
-      status.textContent = 'Showing ' + shown + ' of ' + total + ' MPs';
-      empty.classList.toggle('hidden', shown > 0);
-    }
-    input.addEventListener('input', apply);
-    province.addEventListener('change', apply);
-
-    var top = document.getElementById('to-top');
-    window.addEventListener('scroll', function () {
-      var show = window.scrollY > 700;
-      top.classList.toggle('hidden', !show);
-      top.classList.toggle('inline-flex', show);
-    }, { passive: true });
-    top.addEventListener('click', function () { window.scrollTo({ top: 0 }); });
-  })();
-</script>
 {% endblock %}

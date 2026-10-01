@@ -23,6 +23,7 @@ Run locally:
 from __future__ import annotations
 
 import calendar
+import gzip
 import csv
 import io
 import unicodedata
@@ -670,6 +671,8 @@ def fetch_bill_json(parl_session: str, number: str) -> dict | None:
                 "house_votes": _votes(raw.get("HouseVoteDetails")),
                 "senate_votes": _votes(raw.get("SenateVoteDetails")),
                 "in_force": find_in_force(raw.get("ShortLegislativeSummaryEn") or ""),
+                "speeches": extract_speeches(raw),
+                "committees": extract_committees(raw),
             }
     except (requests.RequestException, ValueError, IndexError):
         data = None
@@ -1246,9 +1249,49 @@ STAGE_TERMS = {"First reading": "first-reading", "Second reading": "second-readi
                "Third reading": "third-reading", "Royal assent": "royal-assent"}
 
 
+def _static_version(filename: str) -> int:
+    """Changes whenever a static file is rebuilt, so browsers fetch the new copy."""
+    try:
+        return int(os.path.getmtime(os.path.join(app.static_folder, filename)))
+    except OSError:
+        return 0
+
+
 @app.context_processor
 def inject_site_globals():
-    return {"glossary_data": GLOSSARY_BY_SLUG}
+    return {"glossary_data": GLOSSARY_BY_SLUG, "css_version": _static_version("app.css"),
+            "js_version": _static_version("app.js")}
+
+
+# --------------------------------------------------------------------------
+# Speed: browser caching for static files, and gzip for text responses
+# --------------------------------------------------------------------------
+COMPRESSIBLE = ("text/html", "text/css", "text/csv", "application/json", "image/svg+xml", "application/javascript")
+
+
+@app.after_request
+def speed_up(response: Response) -> Response:
+    # The stylesheet's URL carries a version number, so it can be kept for a year.
+    if request.endpoint == "static":
+        if request.path.endswith(("/app.css", "/app.js")) and request.args.get("v"):
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        else:
+            response.headers["Cache-Control"] = "public, max-age=86400"
+
+    accepts_gzip = "gzip" in request.headers.get("Accept-Encoding", "").lower()
+    if (not accepts_gzip or response.status_code != 200 or "Content-Encoding" in response.headers
+            or response.mimetype not in COMPRESSIBLE):
+        return response
+    response.direct_passthrough = False  # lets static files be read and compressed too
+    data = response.get_data()
+    if len(data) < 600:
+        return response
+    packed = gzip.compress(data, compresslevel=6)
+    response.set_data(packed)
+    response.headers["Content-Encoding"] = "gzip"
+    response.headers["Content-Length"] = str(len(packed))
+    response.headers.add("Vary", "Accept-Encoding")
+    return response
 
 
 # --------------------------------------------------------------------------
@@ -1534,6 +1577,348 @@ def bills_csv(bills: list[dict], filename: str) -> Response:
     return csv_response(filename, header, rows)
 
 
+# --------------------------------------------------------------------------
+# Debates and committee studies, read from each bill's own JSON
+# --------------------------------------------------------------------------
+HANSARD_SITTING_URL = "https://www.ourcommons.ca/DocumentViewer/en/{session}/house/sitting-{sitting}/hansard"
+OPENPARLIAMENT_BILL_URL = "https://openparliament.ca/bills/{session}/{number}/"
+TRUSTED_LINK_HOSTS = ("sencanada.ca", "www.sencanada.ca", "www.ourcommons.ca")
+COMMITTEE_ACRONYM_RE = re.compile(r"^[A-Z]{2,8}$")
+HOUSE_COMMITTEE_URL = "https://www.ourcommons.ca/Committees/en/{acr}"
+HOUSE_COMMITTEE_MEMBERS_URL = "https://www.ourcommons.ca/Committees/en/{acr}/Members"
+COMMITTEE_LIST_URL = "https://www.ourcommons.ca/Committees/en/List"
+
+
+def _walk(node):
+    """Every dict inside a nested JSON structure."""
+    stack = [node]
+    while stack:
+        cur = stack.pop()
+        if isinstance(cur, dict):
+            yield cur
+            stack.extend(v for v in cur.values() if isinstance(v, (dict, list)))
+        elif isinstance(cur, list):
+            stack.extend(v for v in cur if isinstance(v, (dict, list)))
+
+
+def _safe_url(url) -> str:
+    """Only pass along links to Parliament's own sites."""
+    if not isinstance(url, str) or not url.startswith("https://"):
+        return ""
+    host = url[len("https://"):].split("/", 1)[0].lower()
+    return url if host in TRUSTED_LINK_HOSTS else ""
+
+
+def extract_speeches(raw: dict) -> list[dict]:
+    """Sponsor's speeches and other recorded interventions, oldest first."""
+    seen, out = set(), []
+    for item in _walk(raw):
+        if not ("EventTypeName" in item and "PersonName" in item and "SpeechDateTime" in item):
+            continue
+        key = (item.get("InterventionEventId") or item.get("PersonId"), item.get("SpeechDateTime"), item.get("EventTypeId"))
+        if key in seen:
+            continue
+        seen.add(key)
+        when = parse_date(str(item.get("SpeechDateTime") or ""))
+        out.append({
+            "name": str(item.get("PersonName") or "").strip(),
+            "party": str(item.get("CaucusShortNameEn") or item.get("CaucusShortName") or "").strip(),
+            "kind": str(item.get("EventTypeNameEn") or item.get("EventTypeName") or "").strip(),
+            "date": when.date().isoformat() if when else "",
+            "senate": item.get("ChamberOrganizationId") == 2,
+            "sitting": str(item.get("MeetingNumber") or "").strip(),
+            "url": _safe_url(item.get("UrlEn") or item.get("Url") or ""),
+        })
+    out = [s for s in out if s["name"]]
+    out.sort(key=lambda s: s["date"])
+    return out[-40:]
+
+
+def extract_committees(raw: dict) -> list[dict]:
+    """Committees that have studied the bill, with how many meetings they held on it."""
+    by_acr: dict[str, dict] = {}
+    for item in _walk(raw):
+        acr = item.get("CommitteeAcronym")
+        if not isinstance(acr, str) or not COMMITTEE_ACRONYM_RE.match(acr.strip().upper()):
+            continue
+        acr = acr.strip().upper()
+        entry = by_acr.setdefault(acr, {"acr": acr, "name": "", "meetings": set(), "dates": set()})
+        name = item.get("CommitteeNameEn") or item.get("CommitteeName")
+        if name and not entry["name"]:
+            entry["name"] = str(name).strip()
+        if "Number" in item and item.get("Date"):
+            when = parse_date(str(item["Date"]))
+            if when:
+                entry["meetings"].add((str(item["Number"]), when.date().isoformat()))
+                entry["dates"].add(when.date().isoformat())
+    out = []
+    for entry in by_acr.values():
+        dates = sorted(entry["dates"])
+        out.append({"acr": entry["acr"], "name": entry["name"] or entry["acr"], "meetings": len(entry["meetings"]),
+                    "first": dates[0] if dates else "", "last": dates[-1] if dates else "",
+                    "senate": "senate" in entry["name"].lower()})
+    out.sort(key=lambda c: c["first"] or "9999")
+    return out
+
+
+def speech_link(speech: dict, parl_session: str) -> str:
+    """A link to the debate: the Senate gives one per speech, the House gives a sitting number."""
+    if speech["url"]:
+        return speech["url"]
+    if not speech["senate"] and speech["sitting"].isdigit():
+        return HANSARD_SITTING_URL.format(session=parl_session, sitting=speech["sitting"])
+    return ""
+
+
+# --------------------------------------------------------------------------
+# Committees: list, and each committee's members (read from the House of Commons site)
+# --------------------------------------------------------------------------
+COMMITTEE_NAMES = {
+    "ACVA": "Veterans Affairs", "AGRI": "Agriculture and Agri-Food", "CHPC": "Canadian Heritage",
+    "CIMM": "Citizenship and Immigration", "ENVI": "Environment and Sustainable Development",
+    "ETHI": "Access to Information, Privacy and Ethics", "FAAE": "Foreign Affairs and International Development",
+    "FEWO": "Status of Women", "FINA": "Finance", "FOPO": "Fisheries and Oceans", "HESA": "Health",
+    "HUMA": "Human Resources, Skills and Social Development and the Status of Persons with Disabilities",
+    "INAN": "Indigenous and Northern Affairs", "INDU": "Industry and Technology",
+    "JUST": "Justice and Human Rights", "LANG": "Official Languages", "NDDN": "National Defence",
+    "OGGO": "Government Operations and Estimates", "PACP": "Public Accounts", "PROC": "Procedure and House Affairs",
+    "RNNR": "Natural Resources", "SECU": "Public Safety and National Security",
+    "TRAN": "Transport, Infrastructure and Communities", "CIIT": "International Trade", "LIAI": "Liaison",
+}
+COMMITTEE_LINK_RE = re.compile(r"/Committees/en/([A-Z]{3,6})(?=[\"'?#/]|$)")
+COMMITTEE_TTL = 12 * 3600
+COMMITTEE_FAIL_TTL = 5 * 60
+
+_committee_list_cache: dict = {"expires": 0.0, "items": []}
+_committee_cache: dict = {}
+_committee_lock = threading.Lock()
+
+
+def parse_committee_list(page_html: str) -> list[str]:
+    acronyms: list[str] = []
+    for match in COMMITTEE_LINK_RE.finditer(page_html):
+        if match.group(1) not in acronyms:
+            acronyms.append(match.group(1))
+    return acronyms
+
+
+def get_committee_list() -> list[dict]:
+    now = time.time()
+    with _committee_lock:
+        if now < _committee_list_cache["expires"]:
+            return _committee_list_cache["items"]
+    acronyms: list[str] = []
+    try:
+        resp = requests.get(COMMITTEE_LIST_URL, timeout=20, headers={"User-Agent": "legis-bill-tracker/1.0"})
+        resp.raise_for_status()
+        acronyms = parse_committee_list(resp.text)
+    except requests.RequestException:
+        acronyms = []
+    if len(acronyms) < 5:  # a real list has dozens; fewer means the page changed
+        acronyms = list(COMMITTEE_NAMES)
+    items = [{"acr": a, "name": COMMITTEE_NAMES.get(a, "")} for a in acronyms]
+    with _committee_lock:
+        _committee_list_cache.update(items=items, expires=now + COMMITTEE_TTL)
+    return items
+
+
+def parse_committee_page(page_html: str) -> dict:
+    """{'name': str, 'people': [(PersonId, role)]} from a committee's Members page.
+
+    The page groups members under headings (Chair, Vice-Chairs, Members, Associate Members),
+    so a member's role is the last heading seen before their link."""
+    title = re.search(r"<h1[^>]*>(.*?)</h1>", page_html, re.IGNORECASE | re.DOTALL)
+    name = html_to_text(title.group(1)) if title else ""
+    people: list[tuple[int, str]] = []
+    seen: set[int] = set()
+    role = "Member"
+    last_end = 0
+    for match in MEMBER_LINK_RE.finditer(page_html):
+        tail = html_to_text(page_html[last_end:match.start()])[-60:].lower()
+        if "associate" in tail:
+            role = "Associate"
+        elif re.search(r"vice-?\s?chairs?\W*$", tail):
+            role = "Vice-Chair"
+        elif re.search(r"\bchair\W*$", tail):
+            role = "Chair"
+        elif re.search(r"\bmembers?\W*$", tail):
+            role = "Member"
+        last_end = match.end()
+        pid = int(match.group(1))
+        if pid not in seen and role != "Associate":
+            seen.add(pid)
+            people.append((pid, role))
+    return {"name": name, "people": people}
+
+
+def get_committee(acr: str) -> dict | None:
+    key = acr.upper()
+    now = time.time()
+    with _committee_lock:
+        hit = _committee_cache.get(key)
+    if hit and now < hit["expires"]:
+        return hit["data"]
+    data = None
+    try:
+        resp = requests.get(HOUSE_COMMITTEE_MEMBERS_URL.format(acr=key), timeout=20,
+                            headers={"User-Agent": "legis-bill-tracker/1.0"})
+        if resp.status_code == 200:
+            parsed = parse_committee_page(resp.text)
+            if parsed["people"]:
+                data = parsed
+    except requests.RequestException:
+        data = None
+    with _committee_lock:
+        _committee_cache[key] = {"data": data, "expires": now + (COMMITTEE_TTL if data else COMMITTEE_FAIL_TTL)}
+    return data
+
+
+# --------------------------------------------------------------------------
+# Senators (unofficial: read from Wikipedia's list, because the Senate's own list isn't machine readable)
+# --------------------------------------------------------------------------
+SENATE_LIST_URL = "https://en.wikipedia.org/wiki/List_of_current_senators_of_Canada"
+SENATE_OFFICIAL_URL = "https://sencanada.ca/en/senators/"
+SENATE_TTL = 12 * 3600
+SENATE_GROUPS = {
+    "ISG": "Independent Senators Group", "CSG": "Canadian Senators Group", "PSG": "Progressive Senate Group",
+    "CPC": "Conservative", "C": "Conservative", "NA": "Non-affiliated", "N/A": "Non-affiliated",
+}
+SENATE_GROUP_COLOURS = {
+    "Independent Senators Group": "#4a6fa5", "Canadian Senators Group": "#8a6d3b", "Progressive Senate Group": "#3d9b35",
+    "Conservative": "#1a4782", "Non-affiliated": "#8a8d93",
+}
+PROVINCES = {
+    "NL": "Newfoundland and Labrador", "PE": "Prince Edward Island", "PEI": "Prince Edward Island", "NS": "Nova Scotia",
+    "NB": "New Brunswick", "QC": "Quebec", "QUE": "Quebec", "ON": "Ontario", "ONT": "Ontario", "MB": "Manitoba",
+    "SK": "Saskatchewan", "AB": "Alberta", "BC": "British Columbia", "YT": "Yukon", "NT": "Northwest Territories",
+    "NU": "Nunavut",
+}
+
+_senate_cache: dict = {"expires": 0.0, "senators": [], "error": None}
+_senate_lock = threading.Lock()
+
+
+class _TableParser(HTMLParser):
+    """Collects every table as rows of cells: {'text', 'href'}."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.tables: list[list[list[dict]]] = []
+        self._row: list[dict] | None = None
+        self._cell: dict | None = None
+        self._skip = 0
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "table":
+            self.tables.append([])
+        elif tag == "tr" and self.tables:
+            self._row = []
+            self.tables[-1].append(self._row)
+        elif tag in ("td", "th") and self._row is not None:
+            self._cell = {"text": "", "href": ""}
+            self._row.append(self._cell)
+        elif tag in ("sup", "style", "script") and self._cell is not None:
+            self._skip += 1
+        elif tag == "a" and self._cell is not None and not self._cell["href"]:
+            href = dict(attrs).get("href") or ""
+            if href.startswith("/wiki/") and ":" not in href:
+                self._cell["href"] = "https://en.wikipedia.org" + href
+
+    def handle_endtag(self, tag):
+        if tag in ("td", "th"):
+            self._cell = None
+        elif tag in ("sup", "style", "script") and self._skip:
+            self._skip -= 1
+
+    def handle_data(self, data):
+        if self._cell is not None and not self._skip:
+            self._cell["text"] += data
+
+
+def parse_senators(page_html: str) -> list[dict]:
+    parser = _TableParser()
+    try:
+        parser.feed(page_html)
+        parser.close()
+    except Exception:
+        pass
+    for table in parser.tables:
+        header = next((row for row in table if row and any("name" in c["text"].lower() for c in row)), None)
+        if not header:
+            continue
+        labels = [re.sub(r"\s+", " ", c["text"]).strip().lower() for c in header]
+
+        def col(*words):
+            return next((i for i, label in enumerate(labels) if any(w in label for w in words)), None)
+
+        name_i, group_i = col("name"), col("affiliation", "group", "party")
+        prov_i, retire_i = col("province", "division"), col("retirement")
+        if name_i is None or group_i is None or prov_i is None:
+            continue
+        senators = []
+        for row in table[table.index(header) + 1:]:
+            if len(row) <= max(name_i, group_i, prov_i):
+                continue
+            clean = lambda i: re.sub(r"\s+", " ", re.sub(r"\[[^\]]*\]", "", row[i]["text"])).strip() if i is not None and i < len(row) else ""
+            name = clean(name_i)
+            if not name or name.lower() in ("vacant", "name"):
+                continue
+            abbr = clean(group_i)
+            prov = clean(prov_i)
+            senators.append({
+                "name": name,
+                "group": SENATE_GROUPS.get(abbr.upper(), abbr or "Unknown"),
+                "province": PROVINCES.get(prov.upper(), prov),
+                "retires": clean(retire_i),
+                "wiki": row[name_i]["href"],
+                "initials": _initials(name),
+            })
+        if len(senators) >= 50:  # a real list has about a hundred
+            return senators
+    return []
+
+
+def get_senators() -> dict:
+    now = time.time()
+    with _senate_lock:
+        if now < _senate_cache["expires"]:
+            return _senate_cache
+        senators, error = [], None
+        try:
+            resp = requests.get(SENATE_LIST_URL, timeout=25,
+                                headers={"User-Agent": "ParlTrackCanada/1.0 (https://parltrack-canada.onrender.com)"})
+            resp.raise_for_status()
+            senators = parse_senators(resp.text)
+        except requests.RequestException as exc:
+            error = str(exc)
+        if not senators:
+            error = error or "the list's layout was not recognised"
+        for s in senators:
+            s["search"] = _strip_accents(f"{s['name']} {s['province']} {s['group']}").lower()
+        senators.sort(key=lambda s: _strip_accents(s["name"].split(" ")[-1]).lower())
+        _senate_cache.update(senators=senators, error=None if senators else f"Could not load the Senate list: {error}",
+                             expires=now + (SENATE_TTL if senators else DIRECTORY_FAIL_TTL))
+        return _senate_cache
+
+
+def senate_groups(senators: list[dict]) -> list[dict]:
+    by_group: dict[str, list[dict]] = {}
+    for s in senators:
+        by_group.setdefault(s["group"], []).append(s)
+    order = sorted(by_group, key=lambda g: (g == "Non-affiliated", -len(by_group[g]), g))
+    return [{"party": g, "slug": _slug(g), "colour": SENATE_GROUP_COLOURS.get(g, OTHER_COLOUR), "members": by_group[g]}
+            for g in order]
+
+
+def warm_up() -> None:
+    """Load the slow data in the background right after the server starts."""
+    try:
+        fetch_records()
+        get_directory()
+    except Exception:
+        pass
+
+
 def _int_arg(name: str, default: int, low: int, high: int) -> int:
     try:
         value = int(request.args.get(name, default))
@@ -1693,6 +2078,16 @@ def bill_detail(parl_session: str, number: str):
             blocks, truncated = blocks_from_bill_text(body)
             source = "Summary printed at the start of the bill by its drafters."
 
+    debates = []
+    for sp in reversed((info or {}).get("speeches", [])[-12:]):
+        when = date.fromisoformat(sp["date"]) if sp["date"] else None
+        debates.append({**sp, "when": when, "link": speech_link(sp, parl_session)})
+    committees = [{**c, "link": None if c["senate"] else HOUSE_COMMITTEE_URL.format(acr=c["acr"]),
+                   "page": None if c["senate"] else url_for("committee_page", acr=c["acr"]),
+                   "first_d": date.fromisoformat(c["first"]) if c["first"] else None,
+                   "last_d": date.fromisoformat(c["last"]) if c["last"] else None}
+                  for c in (info or {}).get("committees", [])]
+
     sponsor = None
     if info and info["sponsor_name"]:
         sponsor = {"name": info["sponsor_name"], "title": info["sponsor_title"], "riding": info["sponsor_riding"]}
@@ -1710,6 +2105,9 @@ def bill_detail(parl_session: str, number: str):
         truncated=truncated,
         source=source,
         timeline=build_timeline(bill) if bill else [],
+        debates=debates,
+        committees=committees,
+        debates_url=OPENPARLIAMENT_BILL_URL.format(session=parl_session, number=number),
         share_text=(blocks[0]["text"] if blocks and blocks[0]["text"] else (bill["title"] if bill else ""))[:200],
         doc_url=DOCUMENT_URL.format(session=parl_session, number=number, stage="first-reading"),
         legis_url=LEGISINFO_BILL_URL.format(session=parl_session, number=number.lower()),
@@ -1793,6 +2191,7 @@ def members_page():
         member_total=len(members),
         provinces=provinces,
         has_contacts=directory["contacts"],
+        section="house",
         error=directory["error"],
         postal=postal,
         lookup=lookup,
@@ -1800,6 +2199,83 @@ def members_page():
         fetched_at=None,
         total=0,
     )
+
+
+@app.route("/members/senate")
+def senate_page():
+    data = get_senators()
+    senators = data["senators"]
+    return render_template(
+        "senate.html",
+        active_tab="members",
+        page_width="max-w-4xl",
+        section="senate",
+        groups=senate_groups(senators),
+        member_total=len(senators),
+        provinces=sorted({s["province"] for s in senators if s["province"]}),
+        error=data["error"],
+        official_url=SENATE_OFFICIAL_URL,
+        fetched_at=None,
+        total=0,
+    )
+
+
+@app.route("/committees")
+def committees_page():
+    return render_template(
+        "committees.html",
+        active_tab="members",
+        page_width="max-w-4xl",
+        section="committees",
+        committees=get_committee_list(),
+        list_url=COMMITTEE_LIST_URL,
+        fetched_at=None,
+        total=0,
+    )
+
+
+@app.route("/committees/<acr>")
+def committee_page(acr: str):
+    acr = acr.upper()
+    if not re.match(r"^[A-Z]{3,6}$", acr):
+        abort(404)
+    data = get_committee(acr)
+    by_id = {m["id"]: m for m in get_directory()["members"]}
+    roster = {"Chair": [], "Vice-Chair": [], "Member": []}
+    if data:
+        for pid, role in data["people"]:
+            if pid in by_id:
+                roster.setdefault(role, []).append(by_id[pid])
+    return render_template(
+        "committee.html",
+        active_tab="members",
+        page_width="max-w-4xl",
+        section="committees",
+        acr=acr,
+        name=(data or {}).get("name") or ("Standing Committee on " + COMMITTEE_NAMES[acr] if acr in COMMITTEE_NAMES else acr),
+        roster=roster,
+        roster_total=sum(len(v) for v in roster.values()),
+        found=bool(data),
+        official_url=HOUSE_COMMITTEE_URL.format(acr=acr),
+        party_colours=PARTY_COLOURS,
+        fetched_at=None,
+        total=0,
+    )
+
+
+@app.route("/api/snapshot")
+def snapshot_api():
+    """Every bill's current status, so the browser can show what changed since the last visit."""
+    records, _ = fetch_records()
+    bills = {}
+    for rec in records:
+        bill = normalize(rec)
+        if bill and not bill["pro_forma"] and bill["number_ok"]:
+            bills[bill["number"].upper()] = {"s": bill["status"], "p": bill["session"],
+                                             "t": (bill["short_title"] or bill["title"])[:90]}
+    response = jsonify(bills=bills, count=len(bills))
+    response.headers["Cache-Control"] = "public, max-age=300"
+    return response
 
 
 @app.route("/compare")
