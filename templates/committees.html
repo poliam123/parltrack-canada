@@ -12,7 +12,7 @@
     <a href="{{ url_for('committee_page', acr=c.acr) }}"
        class="rise group flex h-full items-start gap-3 rounded-2xl bg-paper p-4 shadow-[0_1px_2px_rgb(0_0_0/0.04)] ring-1 ring-ink-200 transition-shadow hover:shadow-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink-800" style="--i: {{ loop.index0 }}">
       <span class="inline-flex h-7 min-w-[3.25rem] shrink-0 items-center justify-center rounded-md bg-night px-2 text-xs font-bold tracking-wider text-white">{{ c.acr }}</span>
-      <span class="text-sm font-medium leading-snug text-ink-900 group-hover:text-maple-700">{{ c.name or 'Committee' }}</span>
+      <span class="text-sm font-medium leading-snug text-ink-900 group-hover:text-maple-700">{{ c.name or c.acr }}</span>
     </a>
   </li>
   {% endfor %}

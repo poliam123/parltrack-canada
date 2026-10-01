@@ -1694,12 +1694,19 @@ _committee_cache: dict = {}
 _committee_lock = threading.Lock()
 
 
-def parse_committee_list(page_html: str) -> list[str]:
-    acronyms: list[str] = []
-    for match in COMMITTEE_LINK_RE.finditer(page_html):
-        if match.group(1) not in acronyms:
-            acronyms.append(match.group(1))
-    return acronyms
+def parse_committee_list(page_html: str) -> dict[str, str]:
+    """{acronym: name}. The name is the link's own text when the page gives one."""
+    found: dict[str, str] = {}
+    pattern = re.compile(r"<a\b[^>]*href=[\"']([^\"']*/Committees/en/([A-Z]{3,6}))(?=[\"'?#/])[^>]*>(.*?)</a>",
+                         re.IGNORECASE | re.DOTALL)
+    for match in pattern.finditer(page_html):
+        acr = match.group(2).upper()
+        text = re.sub(r"\s*\(?\b" + acr + r"\b\)?\s*", " ", html_to_text(match.group(3)), flags=re.IGNORECASE).strip(" -:\u2013\u2014")
+        if acr not in found or (text and not found[acr]):
+            found[acr] = text if len(text) > 3 else found.get(acr, "")
+    for acr in COMMITTEE_LINK_RE.findall(page_html):  # links the pattern above could not read
+        found.setdefault(acr, "")
+    return found
 
 
 def get_committee_list() -> list[dict]:
@@ -1707,16 +1714,16 @@ def get_committee_list() -> list[dict]:
     with _committee_lock:
         if now < _committee_list_cache["expires"]:
             return _committee_list_cache["items"]
-    acronyms: list[str] = []
+    parsed: dict[str, str] = {}
     try:
         resp = requests.get(COMMITTEE_LIST_URL, timeout=20, headers={"User-Agent": "legis-bill-tracker/1.0"})
         resp.raise_for_status()
-        acronyms = parse_committee_list(resp.text)
+        parsed = parse_committee_list(resp.text)
     except requests.RequestException:
-        acronyms = []
-    if len(acronyms) < 5:  # a real list has dozens; fewer means the page changed
-        acronyms = list(COMMITTEE_NAMES)
-    items = [{"acr": a, "name": COMMITTEE_NAMES.get(a, "")} for a in acronyms]
+        parsed = {}
+    if len(parsed) < 5:  # a real list has dozens; fewer means the page changed
+        parsed = {a: "" for a in COMMITTEE_NAMES}
+    items = [{"acr": a, "name": COMMITTEE_NAMES.get(a) or n} for a, n in parsed.items()]
     with _committee_lock:
         _committee_list_cache.update(items=items, expires=now + COMMITTEE_TTL)
     return items
