@@ -1726,7 +1726,9 @@ def get_committee_list() -> list[dict]:
         parsed = {}
     if len(parsed) < 5:  # a real list has dozens; fewer means the page changed
         parsed = {a: "" for a in COMMITTEE_NAMES}
-    items = [{"acr": a, "name": COMMITTEE_NAMES.get(a) or n} for a, n in parsed.items()]
+    # Only committees with a name we know are shown. The page's own link text is not used: it can be a
+    # label like "Access" rather than a real name.
+    items = [{"acr": a, "name": COMMITTEE_NAMES[a]} for a in parsed if a in COMMITTEE_NAMES]
     items = [i for i in items if i["name"]]  # codes with no name are subcommittees (e.g. SFIN): leave them out
     with _committee_lock:
         _committee_list_cache.update(items=items, expires=now + COMMITTEE_TTL)
