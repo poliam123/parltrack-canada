@@ -7,7 +7,7 @@
 
 {% block content %}
   <form method="get" action="{{ url_for('index') }}" role="search"
-        class="mb-4 rounded-xl bg-white p-3 shadow-sm ring-1 ring-ink-200">
+        class="mb-4 rounded-2xl bg-paper p-4 shadow-sm ring-1 ring-ink-200">
     <label for="q" class="sr-only">Search bills</label>
     <input id="q" name="q" type="search" value="{{ q }}" placeholder="Search a keyword or number, e.g. housing or C-5"
            class="w-full rounded-md border-0 bg-ink-50 px-3 py-2 text-sm text-ink-900 ring-1 ring-inset ring-ink-200 placeholder:text-ink-400 focus:outline-none focus:ring-2 focus:ring-maple-600">
@@ -35,7 +35,8 @@
     <div class="mt-3 flex flex-wrap items-center gap-3">
       <button type="submit" class="rounded-md bg-maple-600 px-4 py-2 text-sm font-semibold text-white hover:bg-maple-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink-800">Apply</button>
       {% if filtered or sort != 'progress' %}<a href="{{ url_for('index') }}" class="text-sm text-ink-600 underline decoration-maple-600 underline-offset-2 hover:text-ink-900">Clear</a>{% endif %}
-      <a href="{{ url_for('following') }}" class="ml-auto text-sm font-semibold text-ink-800 underline decoration-maple-600 underline-offset-2 hover:text-maple-700">&#9733; My bills</a>
+      <a href="{{ export_url }}" class="inline-flex items-center gap-1 text-sm text-ink-600 hover:text-ink-900" download><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0l-4-4m4 4l4-4M5 20h14"/></svg>Spreadsheet</a>
+      <a href="{{ url_for('following') }}" class="ml-auto text-sm font-semibold text-ink-800 underline decoration-maple-600/60 underline-offset-2 hover:text-maple-700">&#9733; My bills</a>
     </div>
   </form>
 
@@ -43,16 +44,16 @@
   <p class="mb-3 text-sm text-ink-600" aria-live="polite">Showing {{ bills|length }} of {{ match_count }} bill{{ '' if match_count == 1 else 's' }}{% if filtered %} matching your filters{% endif %}.</p>
   <ol class="space-y-4">
     {% for bill in bills %}
-    <li>{{ bill_card(bill, stages) }}</li>
+    <li>{{ bill_card(bill, stages, loop.index0) }}</li>
     {% endfor %}
   </ol>
   {% if more_url %}
   <p class="mt-5 text-center">
-    <a href="{{ more_url }}" class="inline-block rounded-md bg-ink-800 px-5 py-2.5 text-sm font-semibold text-white hover:bg-ink-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink-800">Show more bills</a>
+    <a href="{{ more_url }}" class="inline-block rounded-lg bg-night px-5 py-2.5 text-sm font-semibold text-white ring-1 ring-white/10 hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink-800">Show more bills</a>
   </p>
   {% endif %}
   {% elif not warning %}
-  <div class="rounded-lg bg-white p-5 text-sm text-ink-800 shadow-sm ring-1 ring-ink-200">
+  <div class="rounded-lg bg-paper p-5 text-sm text-ink-800 shadow-sm ring-1 ring-ink-200">
     {% if filtered %}
     <p class="font-semibold">No active bills match those filters.</p>
     <p class="mt-1 text-ink-600">Try a different keyword, or <a class="underline decoration-maple-600 underline-offset-2" href="{{ url_for('index') }}">clear the filters</a>.</p>

@@ -2,6 +2,15 @@
 
 {% block title %}Proposed changes, {{ number }} | ParlTrack Canada{% endblock %}
 
+{% block meta %}
+  <meta property="og:type" content="article">
+  <meta property="og:site_name" content="ParlTrack Canada">
+  <meta property="og:title" content="{{ number }}: {{ short_title or title or 'Bill before Parliament' }}">
+  <meta property="og:description" content="{{ share_text or 'What this bill would change, in plain reading order.' }}">
+  <meta property="og:url" content="{{ request.url }}">
+  <meta name="twitter:card" content="summary">
+{% endblock %}
+
 {% block intro %}The main changes {{ number }} would make, in plain reading order.{% endblock %}
 
 {% block content %}
@@ -11,21 +20,26 @@
   Back to bills
 </a>
 
-<article class="mt-3 overflow-hidden rounded-xl bg-white shadow-sm ring-1 ring-ink-200">
+<article class="rise mt-3 overflow-hidden rounded-2xl bg-paper shadow-[0_1px_2px_rgb(0_0_0/0.04),0_6px_20px_-12px_rgb(0_0_0/0.18)] ring-1 ring-ink-200">
 
-  <header class="border-b border-ink-200 p-5 sm:p-6">
+  <header class="border-b border-ink-200 p-5 sm:p-7">
     <div class="flex flex-wrap items-center gap-2">
-      <span class="inline-flex items-center rounded-md bg-maple-600 px-2.5 py-1 text-sm font-bold text-white">{{ number }}</span>
+      <span class="inline-flex items-center rounded-md bg-maple-600 px-2.5 py-1 text-sm font-bold tracking-wide text-white">{{ number }}</span>
       {% if bill and bill.status %}
-      <span class="inline-flex max-w-full items-center rounded-md bg-ink-800 px-2.5 py-1 text-xs font-medium leading-snug text-white">{{ bill.status }}</span>
+      <span class="inline-flex max-w-full items-center rounded-md bg-ink-100 px-2.5 py-1 text-xs font-medium leading-snug text-ink-700 ring-1 ring-inset ring-ink-200">{{ bill.status }}</span>
       {% endif %}
       {% if doc_type %}
-      <span class="inline-flex items-center rounded-md bg-ink-100 px-2.5 py-1 text-xs font-medium text-ink-700 ring-1 ring-inset ring-ink-200">{{ doc_type }}</span>
+      <span class="inline-flex items-center rounded-md bg-ink-50 px-2.5 py-1 text-xs font-medium text-ink-600 ring-1 ring-inset ring-ink-200">{{ doc_type }}</span>
       {% endif %}
+      <button type="button" data-share data-title="{{ number }}: {{ short_title or title }}" data-text="{{ share_text }}"
+              class="ml-auto inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold text-ink-700 ring-1 ring-inset ring-ink-200 hover:bg-ink-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink-800">
+        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7M16 6l-4-4-4 4M12 2v13"/></svg>
+        <span data-share-label>Share</span>
+      </button>
     </div>
 
-    <h2 class="mt-3 text-lg font-semibold leading-snug text-ink-900">{{ title or short_title or 'Title not available' }}</h2>
-    {% if short_title and title %}<p class="mt-1 text-sm text-ink-600">Short title: {{ short_title }}</p>{% endif %}
+    <h2 class="mt-4 font-serif text-xl font-semibold leading-snug text-ink-900 sm:text-2xl">{{ title or short_title or 'Title not available' }}</h2>
+    {% if short_title and title %}<p class="mt-1.5 text-sm text-ink-500">Short title: {{ short_title }}</p>{% endif %}
 
     {% if sponsor %}
     <p class="mt-3 text-sm text-ink-600">
@@ -35,25 +49,25 @@
     {% endif %}
   </header>
 
-  <div class="px-5 py-6 sm:px-8 sm:py-8">
-    <p class="flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-maple-700">
+  <div class="px-5 py-7 sm:px-9 sm:py-9">
+    <p class="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.18em] text-maple-700">
       <span class="h-px w-6 bg-maple-600" aria-hidden="true"></span>Proposed changes
     </p>
 
     {% if blocks %}
-    <div class="mt-4">
+    <div class="mt-5">
       {% for para in blocks %}
-      <div class="{{ '' if loop.first else 'mt-6' }}">
+      <div class="{{ '' if loop.first else 'mt-7' }}">
         {% if para.text %}
-        <p class="{{ 'text-lg font-medium leading-8 text-ink-900' if loop.first else 'text-[1.0625rem] leading-8 text-ink-800' }}">
+        <p class="font-serif {{ 'text-[1.3125rem] leading-9 text-ink-900' if loop.first else 'text-[1.125rem] leading-8 text-ink-800' }}">
           {% if para.lead %}<strong class="font-bold text-ink-900">{{ para.lead }}</strong> {% endif %}{{ para.text }}
         </p>
         {% endif %}
         {% if para.points %}
-        <ul class="{{ 'mt-3' if para.text else '' }} space-y-2.5">
+        <ul class="{{ 'mt-4' if para.text else '' }} space-y-3">
           {% for point in para.points %}
-          <li class="flex gap-3 text-[1.0625rem] leading-7 text-ink-800">
-            <span class="mt-[0.7rem] h-1.5 w-1.5 shrink-0 bg-maple-600" aria-hidden="true"></span>
+          <li class="flex gap-3.5 font-serif text-[1.125rem] leading-8 text-ink-800">
+            <span class="mt-[0.8rem] h-1.5 w-1.5 shrink-0 rotate-45 bg-maple-600" aria-hidden="true"></span>
             <span>{{ point }}</span>
           </li>
           {% endfor %}
@@ -64,13 +78,13 @@
     </div>
 
     {% if truncated %}
-    <p class="mt-6 rounded-md bg-ink-50 px-3 py-2 text-sm text-ink-600 ring-1 ring-inset ring-ink-200">
+    <p class="mt-7 rounded-lg bg-ink-50 px-4 py-3 text-sm text-ink-600 ring-1 ring-inset ring-ink-200">
       This is shortened to the first five points. The bill itself covers more.
     </p>
     {% endif %}
 
     {% else %}
-    <div class="mt-4 rounded-lg bg-ink-50 p-4 text-ink-800 ring-1 ring-inset ring-ink-200">
+    <div class="mt-5 rounded-xl bg-ink-50 p-5 text-ink-800 ring-1 ring-inset ring-ink-200">
       <p class="font-semibold">No summary is available yet.</p>
       <p class="mt-1 text-sm text-ink-600">
         Parliament hasn't published one for this bill, or its site did not answer.
@@ -80,16 +94,55 @@
     {% endif %}
   </div>
 
-  <footer class="border-t border-ink-200 bg-ink-50 px-5 py-4 sm:px-8">
+  <footer class="border-t border-ink-200 bg-ink-50 px-5 py-4 sm:px-9">
     {% if source %}<p class="text-xs text-ink-500">{{ source }}</p>{% endif %}
     <p class="mt-2 flex flex-wrap gap-x-5 gap-y-2 text-sm">
-      <a class="font-semibold text-maple-700 underline decoration-maple-600 underline-offset-2 hover:text-maple-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink-800"
+      <a class="font-semibold text-maple-700 underline decoration-maple-600/50 underline-offset-2 hover:decoration-maple-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink-800"
          href="{{ doc_url }}" target="_blank" rel="noopener">Read the full bill text</a>
       <a class="text-ink-700 underline decoration-ink-400 underline-offset-2 hover:text-ink-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink-800"
          href="{{ legis_url }}" target="_blank" rel="noopener">View on LEGISinfo</a>
+      <a class="text-ink-700 underline decoration-ink-400 underline-offset-2 hover:text-ink-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink-800"
+         href="{{ url_for('compare', a=number) }}">Compare with another bill</a>
     </p>
   </footer>
 </article>
+
+{% if timeline %}
+<section class="rise mt-4 rounded-2xl bg-paper p-5 shadow-[0_1px_2px_rgb(0_0_0/0.04)] ring-1 ring-ink-200 sm:p-7" style="--i: 2" aria-labelledby="timeline-h">
+  <h2 id="timeline-h" class="font-serif text-lg font-semibold text-ink-900">The path to law</h2>
+  <p class="mt-1 text-sm text-ink-500">Every bill has to clear each step, in both chambers. Tap a step's name to learn what it means.</p>
+  <ol class="mt-5">
+    {% for step in timeline %}
+    <li class="relative flex gap-4 {{ '' if loop.last else 'pb-6' }}">
+      {% if not loop.last %}<span class="absolute left-[0.6rem] top-6 -bottom-0 w-px {{ 'bg-ink-700' if step.state == 'done' else 'bg-ink-200' }}" aria-hidden="true"></span>{% endif %}
+      {% if step.state == 'done' %}
+      <span class="relative z-10 mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-ink-700 text-paper" aria-hidden="true">
+        <svg class="h-3 w-3" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.7 5.3a1 1 0 0 1 0 1.4l-7.5 7.5a1 1 0 0 1-1.4 0L3.3 9.7a1 1 0 1 1 1.4-1.4l3.8 3.8 6.8-6.8a1 1 0 0 1 1.4 0z" clip-rule="evenodd"/></svg>
+      </span>
+      {% elif step.state == 'current' %}
+      <span class="relative z-10 mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-paper ring-2 ring-maple-600" aria-hidden="true"><span class="h-2 w-2 rounded-full bg-maple-600"></span></span>
+      {% else %}
+      <span class="relative z-10 mt-0.5 h-5 w-5 shrink-0 rounded-full bg-paper ring-2 ring-ink-200" aria-hidden="true"></span>
+      {% endif %}
+      <div class="min-w-0 flex-1">
+        <p class="text-[0.9375rem] {{ 'font-semibold text-ink-900' if step.state != 'upcoming' else 'text-ink-500' }}">
+          <button type="button" class="term" data-term="{{ step.term }}">{{ step.label }}</button>
+          <span class="font-normal text-ink-500">&middot; {{ step.where }}</span>
+          {% if step.state == 'current' %}<span class="ml-1 rounded bg-maple-50 px-1.5 py-0.5 text-[0.6875rem] font-bold uppercase tracking-wide text-maple-700">Next up</span>{% endif %}
+        </p>
+        <p class="text-sm text-ink-500">
+          <span class="sr-only">{{ 'Completed' if step.state == 'done' else ('Current step' if step.state == 'current' else 'Not reached yet') }}.</span>
+          {% if step.date %}{{ step.date.strftime('%B %-d, %Y') }}{% elif step.state == 'done' %}Completed{% elif step.state == 'upcoming' %}Not reached yet{% endif %}
+        </p>
+      </div>
+    </li>
+    {% endfor %}
+  </ol>
+  {% if bill and not bill.passed and bill.status and not timeline|selectattr('state', 'equalto', 'current')|list %}
+  <p class="mt-4 rounded-lg bg-ink-50 px-4 py-3 text-sm text-ink-600 ring-1 ring-inset ring-ink-200">This bill is no longer moving. Status: {{ bill.status }}.</p>
+  {% endif %}
+</section>
+{% endif %}
 
 <script>
   // "Back" returns to whichever list you came from (active or passed), when possible.

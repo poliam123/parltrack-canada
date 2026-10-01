@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+
+{% block title %}Glossary | ParlTrack Canada{% endblock %}
+
+{% block intro %}Plain-language definitions of the terms used across ParlTrack Canada.{% endblock %}
+
+{% block content %}
+<nav aria-label="Jump to a term" class="mb-5 flex flex-wrap gap-2">
+  {% for term, text in terms %}
+  <a href="#{{ slugs[loop.index0] }}" class="rounded-full bg-paper px-3 py-1.5 text-xs font-medium text-ink-700 ring-1 ring-inset ring-ink-200 hover:bg-ink-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink-800">{{ term }}</a>
+  {% endfor %}
+</nav>
+<dl class="divide-y divide-ink-200 rounded-2xl bg-paper px-5 shadow-sm ring-1 ring-ink-200">
+  {% for term, text in terms %}
+  <div id="{{ slugs[loop.index0] }}" class="scroll-mt-32 py-4">
+    <dt class="font-serif text-lg font-semibold text-ink-900">{{ term }}</dt>
+    <dd class="mt-1 text-[0.9375rem] leading-relaxed text-ink-700">{{ text }}</dd>
+  </div>
+  {% endfor %}
+</dl>
+{% endblock %}

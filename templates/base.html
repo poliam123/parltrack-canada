@@ -1,14 +1,28 @@
+{% set width = page_width|default('max-w-2xl') %}
 <!doctype html>
-<html lang="en" class="bg-ink-100">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>{% block title %}ParlTrack Canada{% endblock %}</title>
-  <meta name="description" content="Track the bills moving through Canada's Parliament.">
+  <meta name="description" content="Track the bills moving through Canada's Parliament, and find your MP.">
+  {% block meta %}{% endblock %}
+
+  <!-- Apply the saved (or system) colour theme before the page paints, so there is no flash. -->
+  <script>
+    (function () {
+      try {
+        var t = localStorage.getItem('parltrack.theme');
+        if (t === 'dark' || (!t && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+          document.documentElement.classList.add('dark');
+        }
+      } catch (e) {}
+    })();
+  </script>
 
   <!-- PWA -->
   <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
-  <meta name="theme-color" content="#DC2626">
+  <meta name="theme-color" content="#17181b">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -16,118 +30,201 @@
   <link rel="icon" type="image/png" sizes="192x192" href="{{ url_for('static', filename='icons/icon-192.png') }}">
   <link rel="apple-touch-icon" href="{{ url_for('static', filename='icons/icon-180.png') }}">
 
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Source+Serif+4:opsz,wght@8..60,500;8..60,600;8..60,700&display=swap" rel="stylesheet">
+
   <!-- Tailwind Play CDN: fine for development; compile Tailwind for production. -->
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
-    tailwind.config = {
-      theme: {
-        extend: {
-          colors: {
-            maple: { 50: '#fdf0ee', 100: '#fadbd7', 600: '#d52b1e', 700: '#b3231a' },
-            ink: {
-              50: '#f6f6f7', 100: '#ececee', 200: '#d6d7da', 400: '#9a9ea6',
-              500: '#74777f', 600: '#4b4f56', 700: '#3a3d42', 800: '#2b2d31', 900: '#1f2023'
+    (function () {
+      var v = function (n) { return 'rgb(var(--' + n + ') / <alpha-value>)'; };
+      tailwind.config = {
+        darkMode: 'class',
+        theme: {
+          extend: {
+            fontFamily: {
+              sans: ['Inter', 'ui-sans-serif', 'system-ui', '-apple-system', 'Segoe UI', 'Roboto', 'sans-serif'],
+              serif: ['"Source Serif 4"', 'Georgia', 'Cambria', 'serif']
+            },
+            colors: {
+              canvas: v('canvas'), paper: v('paper'), night: v('night'),
+              maple: { 50: v('maple-50'), 100: v('maple-100'), 600: v('maple-600'), 700: v('maple-700') },
+              ink: {
+                50: v('ink-50'), 100: v('ink-100'), 200: v('ink-200'), 400: v('ink-400'), 500: v('ink-500'),
+                600: v('ink-600'), 700: v('ink-700'), 800: v('ink-800'), 900: v('ink-900')
+              }
             }
           }
         }
-      }
-    }
+      };
+    })();
   </script>
+  <style>
+    :root {
+      --canvas: 244 244 242; --paper: 255 255 255; --night: 23 24 27;
+      --ink-50: 246 246 247; --ink-100: 236 236 238; --ink-200: 220 221 224; --ink-400: 154 158 166;
+      --ink-500: 107 110 118; --ink-600: 75 79 86; --ink-700: 58 61 66; --ink-800: 43 45 49; --ink-900: 26 27 30;
+      --maple-50: 253 240 238; --maple-100: 250 219 215; --maple-600: 213 43 30; --maple-700: 179 35 26;
+    }
+    html.dark {
+      --canvas: 14 15 17; --paper: 27 28 31;
+      --ink-50: 35 37 41; --ink-100: 43 45 50; --ink-200: 58 60 66; --ink-400: 112 116 124;
+      --ink-500: 148 152 160; --ink-600: 178 182 189; --ink-700: 208 210 214; --ink-800: 230 231 234; --ink-900: 244 244 245;
+      --maple-50: 58 24 21; --maple-100: 78 31 27; --maple-700: 255 134 122;
+      color-scheme: dark;
+    }
+    html { -webkit-text-size-adjust: 100%; scroll-behavior: smooth; }
+    body { font-feature-settings: "cv11", "ss01"; -webkit-font-smoothing: antialiased; }
+
+    /* Header shrinks a little once you scroll */
+    #top-bar #brand-row { transition: padding .2s ease; }
+    #top-bar[data-scrolled] #brand-row { padding-top: .35rem; padding-bottom: .35rem; }
+    #flag { transition: width .2s ease, height .2s ease; }
+    #top-bar[data-scrolled] #flag { width: 2.5rem; height: 1.25rem; }
+
+    /* Links and buttons that explain a term */
+    .term { border-bottom: 1px dotted currentColor; cursor: help; }
+    .term:hover { color: rgb(var(--maple-700)); }
+
+    /* Loading placeholders */
+    .skeleton { display: block; height: .8rem; border-radius: .375rem;
+      background: linear-gradient(90deg, rgb(var(--ink-100)), rgb(var(--ink-200)), rgb(var(--ink-100)));
+      background-size: 200% 100%; animation: shimmer 1.4s linear infinite; }
+    @keyframes shimmer { to { background-position: -200% 0; } }
+
+    /* Gentle entrance motion */
+    @keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+    .rise { animation: rise .45s ease-out both; animation-delay: calc(min(var(--i, 0), 8) * 50ms); }
+    @keyframes grow { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+    .grow { transform-origin: left center; animation: grow .8s cubic-bezier(.2, .7, .2, 1) both; }
+    @keyframes draw { from { stroke-dasharray: 0 100; } }
+    .donut-seg { animation: draw .9s cubic-bezier(.2, .7, .2, 1) both; transition: opacity .15s, stroke-width .15s; cursor: pointer; }
+    html.dark .donut-seg, html.dark .swatch { filter: brightness(1.3) saturate(1.1); }
+    [data-donut][data-active] .donut-seg { opacity: .22; }
+    [data-donut][data-active] .donut-seg[data-on] { opacity: 1; stroke-width: 7.5; }
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+      *, *::before, *::after { animation: none !important; transition: none !important; }
+    }
+  </style>
 </head>
 
-<body class="min-h-screen bg-ink-100 text-ink-900 antialiased font-sans">
+<body class="min-h-screen bg-canvas font-sans text-ink-900 antialiased">
 
-  <header class="bg-ink-800 text-white pt-[env(safe-area-inset-top)] border-b-4 border-maple-600">
-    <div class="mx-auto max-w-2xl px-4 py-5 sm:py-6">
-      <div class="flex items-center gap-3">
-        <!-- Flag-style mark: red, white, red -->
-        <div class="flex h-8 w-14 shrink-0 overflow-hidden rounded-sm" aria-hidden="true">
-          <div class="w-1/4 bg-maple-600"></div>
-          <div class="w-1/2 bg-white"></div>
-          <div class="w-1/4 bg-maple-600"></div>
-        </div>
-        <h1 class="text-2xl font-bold tracking-tight sm:text-3xl">ParlTrack Canada</h1>
+  <a href="#main" class="sr-only focus:not-sr-only focus:fixed focus:left-3 focus:top-3 focus:z-50 focus:rounded-md focus:bg-paper focus:px-3 focus:py-2 focus:text-sm focus:font-semibold focus:text-ink-900">Skip to content</a>
+
+  <header id="top-bar" class="sticky top-0 z-40 border-b border-white/10 bg-night/90 pt-[env(safe-area-inset-top)] text-white backdrop-blur-md">
+    <div class="mx-auto {{ width }} px-4">
+      <div id="brand-row" class="flex items-center gap-3 py-3">
+        <a href="{{ url_for('index') }}" class="flex min-w-0 items-center gap-3 rounded-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white">
+          <span id="flag" class="block h-7 w-14 shrink-0 overflow-hidden rounded-[3px] shadow ring-1 ring-white/25">{% include "_flag.html" %}</span>
+          <h1 class="truncate font-serif text-xl font-semibold tracking-tight sm:text-2xl">ParlTrack Canada</h1>
+        </a>
+        <button id="theme-toggle" type="button" aria-label="Switch colour theme"
+                class="ml-auto inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-white/80 hover:bg-white/10 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white">
+          <svg class="h-5 w-5 dark:hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.5 14.2A8.5 8.5 0 0 1 9.8 3.5a8.5 8.5 0 1 0 10.7 10.7z"/></svg>
+          <svg class="hidden h-5 w-5 dark:block" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4"/></svg>
+        </button>
       </div>
 
-      <nav aria-label="Sections" class="mt-4 grid grid-cols-3 gap-2">
-        <a href="{{ url_for('index') }}"
-           {% if active_tab == 'active' %}aria-current="page"{% endif %}
-           class="rounded-md px-2 py-2.5 text-center text-sm font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white
-                  {{ 'bg-white text-ink-900' if active_tab == 'active' else 'bg-ink-700 text-white hover:bg-ink-600' }}">
-          Active bills
-        </a>
-        <a href="{{ url_for('passed') }}"
-           {% if active_tab == 'passed' %}aria-current="page"{% endif %}
-           class="rounded-md px-2 py-2.5 text-center text-sm font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white
-                  {{ 'bg-white text-ink-900' if active_tab == 'passed' else 'bg-ink-700 text-white hover:bg-ink-600' }}">
-          Passed bills
-        </a>
-        <a href="{{ url_for('stats') }}"
-           {% if active_tab == 'stats' %}aria-current="page"{% endif %}
-           class="rounded-md px-2 py-2.5 text-center text-sm font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white
-                  {{ 'bg-white text-ink-900' if active_tab == 'stats' else 'bg-ink-700 text-white hover:bg-ink-600' }}">
-          Statistics
-        </a>
+      <nav aria-label="Sections" class="grid grid-cols-4 gap-1 pb-2.5">
+        {% for key, label, endpoint in (('active', 'Active', 'index'), ('passed', 'Passed', 'passed'), ('stats', 'Stats', 'stats'), ('members', 'Members', 'members_page')) %}
+        <a href="{{ url_for(endpoint) }}" {% if active_tab == key %}aria-current="page"{% endif %}
+           class="rounded-lg px-1 py-2 text-center text-[0.8125rem] font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white
+                  {{ 'bg-white text-neutral-900' if active_tab == key else 'text-white/70 hover:bg-white/10 hover:text-white' }}">{{ label }}</a>
+        {% endfor %}
       </nav>
-
-      <p class="mt-4 text-sm text-ink-200 sm:text-base">
-        {% block intro %}{% endblock %}
-      </p>
     </div>
   </header>
 
-  <main class="mx-auto max-w-2xl px-4 pb-[calc(2rem+env(safe-area-inset-bottom))] pt-5">
+  <main id="main" class="mx-auto {{ width }} px-4 pb-[calc(2.5rem+env(safe-area-inset-bottom))] pt-6">
+
+    <p class="mb-5 text-sm leading-relaxed text-ink-600">{% block intro %}{% endblock %}</p>
 
     {% if warning %}
-    <div role="alert" class="mb-4 rounded-lg border-l-4 border-maple-600 bg-white p-4 text-sm text-ink-800 shadow-sm">
+    <div role="alert" class="mb-4 rounded-xl border-l-4 border-maple-600 bg-paper p-4 text-sm text-ink-800 shadow-sm ring-1 ring-ink-200">
       {{ warning }}
     </div>
     {% endif %}
 
     {% block content %}{% endblock %}
 
-    <footer class="mt-8 text-xs leading-relaxed text-ink-500">
-      {% if fetched_at %}<p>Fetched {{ fetched_at.strftime('%Y-%m-%d %H:%M') }}{% if total %}, {{ total }} bills in the feed{% endif %}.</p>{% endif %}
+    <footer class="mt-10 border-t border-ink-200 pt-5 text-xs leading-relaxed text-ink-500">
+      <p class="flex flex-wrap gap-x-4 gap-y-1 font-medium">
+        <a class="underline decoration-ink-400 underline-offset-2 hover:text-ink-900" href="{{ url_for('glossary') }}">Glossary</a>
+        <a class="underline decoration-ink-400 underline-offset-2 hover:text-ink-900" href="{{ url_for('compare') }}">Compare bills</a>
+        <a class="underline decoration-ink-400 underline-offset-2 hover:text-ink-900" href="{{ url_for('following') }}">&#9733; My bills</a>
+      </p>
+      {% if fetched_at %}<p class="mt-3">Fetched {{ fetched_at.strftime('%Y-%m-%d %H:%M') }}{% if total %}, {{ total }} bills in the feed{% endif %}.</p>{% endif %}
       <p class="mt-1">
-        Data from <a class="underline decoration-maple-600 underline-offset-2 hover:text-ink-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink-800"
-                     href="https://www.parl.ca/legisinfo/en/bills">LEGISinfo</a>, Parliament of Canada.
+        Data from <a class="underline decoration-ink-400 underline-offset-2 hover:text-ink-900" href="https://www.parl.ca/legisinfo/en/bills">LEGISinfo</a>,
+        the <a class="underline decoration-ink-400 underline-offset-2 hover:text-ink-900" href="https://www.ourcommons.ca/members/en">House of Commons</a>
+        and <a class="underline decoration-ink-400 underline-offset-2 hover:text-ink-900" href="https://represent.opennorth.ca/">Open North's Represent</a>.
         Proposed changes are the opening summary printed with each bill. The other lines are built from the bill's listed title and status.
       </p>
     </footer>
   </main>
 
+  <!-- Plain-language definitions: opened from any dotted term -->
+  <div id="term-sheet" hidden class="fixed inset-x-0 bottom-0 z-50 px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))]">
+    <div role="dialog" aria-modal="false" aria-labelledby="term-title" class="mx-auto max-w-lg rounded-2xl bg-paper p-5 shadow-2xl ring-1 ring-ink-200">
+      <div class="flex items-start justify-between gap-4">
+        <h2 id="term-title" class="font-serif text-lg font-semibold text-ink-900"></h2>
+        <button id="term-close" type="button" class="-mr-2 -mt-1 rounded-md p-2 text-ink-500 hover:bg-ink-100 hover:text-ink-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ink-800" aria-label="Close">
+          <svg class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path d="M5.3 5.3a1 1 0 0 1 1.4 0L10 8.6l3.3-3.3a1 1 0 1 1 1.4 1.4L11.4 10l3.3 3.3a1 1 0 0 1-1.4 1.4L10 11.4l-3.3 3.3a1 1 0 0 1-1.4-1.4L8.6 10 5.3 6.7a1 1 0 0 1 0-1.4z"/></svg>
+        </button>
+      </div>
+      <p id="term-text" class="mt-1 text-sm leading-relaxed text-ink-700"></p>
+      <a class="mt-3 inline-block text-xs font-semibold text-maple-700 underline underline-offset-2" href="{{ url_for('glossary') }}">See the full glossary</a>
+    </div>
+  </div>
+
+  <script type="application/json" id="glossary-data">{{ glossary_data|tojson }}</script>
   <script>
     (function () {
-      // Runs a list of slots through a loader a few at a time, so a slow response from
-      // Parliament's site never holds up the page.
+      var root = document.documentElement;
+
+      // ---- Colour theme toggle ----
+      var themeBtn = document.getElementById('theme-toggle');
+      function syncThemeLabel() {
+        themeBtn.setAttribute('aria-label', root.classList.contains('dark') ? 'Switch to light theme' : 'Switch to dark theme');
+      }
+      syncThemeLabel();
+      themeBtn.addEventListener('click', function () {
+        var dark = root.classList.toggle('dark');
+        try { localStorage.setItem('parltrack.theme', dark ? 'dark' : 'light'); } catch (e) {}
+        syncThemeLabel();
+      });
+
+      // ---- Header shrinks on scroll ----
+      var bar = document.getElementById('top-bar');
+      function onScroll() { if (window.scrollY > 24) { bar.setAttribute('data-scrolled', ''); } else { bar.removeAttribute('data-scrolled'); } }
+      window.addEventListener('scroll', onScroll, { passive: true });
+      onScroll();
+
+      // ---- Loading queues: a few requests at a time so Parliament's site is never hammered ----
       function queue(slots, load, width) {
         var next = 0;
-        function worker() {
-          if (next >= slots.length) { return; }
-          load(slots[next++]).then(worker);
-        }
+        function worker() { if (next >= slots.length) { return; } load(slots[next++]).then(worker); }
         for (var i = 0; i < width; i++) { worker(); }
       }
-
       function getJson(url) {
         return fetch(url, { headers: { 'Accept': 'application/json' } }).then(function (r) { return r.json(); });
       }
 
-      // 1. Official summary text under "Proposed changes"
+      // Official summary text under "Proposed changes"
       queue(Array.prototype.slice.call(document.querySelectorAll('[data-summary-url]')), function (slot) {
         var target = slot.querySelector('[data-summary-text]');
         return getJson(slot.getAttribute('data-summary-url'))
           .then(function (data) {
-            target.textContent = data.summary ||
-              'No official summary was found for this bill. Read the bill text for details.';
+            target.textContent = data.summary || 'No official summary was found for this bill. Read the bill text for details.';
           })
-          .catch(function () {
-            target.textContent = 'The summary could not be loaded. Reload the page to try again.';
-          })
+          .catch(function () { target.textContent = 'The summary could not be loaded. Reload the page to try again.'; })
           .then(function () { slot.removeAttribute('aria-busy'); });
       }, 3);
 
-      // 2. Sponsor, party, recorded votes, and in-force note
+      // Sponsor, party, recorded votes, and in-force note
       function show(el, text) { if (el && text) { el.textContent = text; el.hidden = false; } }
       function voteText(label, v) {
         if (!v) { return ''; }
@@ -142,17 +239,17 @@
                    'Sponsor: ' + d.sponsor + (d.party ? ', ' + d.party : '') + (d.riding ? ' (' + d.riding + ')' : ''));
             }
             var votes = [voteText('Latest House vote', d.house_vote), voteText('Latest Senate vote', d.senate_vote)]
-              .filter(Boolean).join(' \u00b7 ');
+              .filter(Boolean).join(' · ');
             show(slot.querySelector('[data-meta-vote]'), votes);
             show(slot.querySelector('[data-meta-force]'), d.in_force ? 'In force: ' + d.in_force : '');
           })
           .catch(function () { /* the card is fine without it */ });
       }, 2);
 
-      // 3. Star buttons: the list of followed bills is kept in this browser only
+      // ---- Star buttons: the list of followed bills is kept in this browser only ----
       var KEY = 'parltrack.follow';
       function readList() { try { return JSON.parse(localStorage.getItem(KEY) || '[]'); } catch (e) { return []; } }
-      function writeList(list) { try { localStorage.setItem(KEY, JSON.stringify(list)); } catch (e) { /* storage blocked */ } }
+      function writeList(list) { try { localStorage.setItem(KEY, JSON.stringify(list)); } catch (e) {} }
       function paint(btn, on) {
         btn.setAttribute('aria-pressed', on ? 'true' : 'false');
         btn.setAttribute('aria-label', (on ? 'Stop following ' : 'Follow ') + btn.getAttribute('data-follow'));
@@ -171,7 +268,66 @@
           paint(btn, at === -1);
         });
       });
+
+      // ---- Glossary pop-up ----
+      var glossary = {};
+      try { glossary = JSON.parse(document.getElementById('glossary-data').textContent); } catch (e) {}
+      var sheet = document.getElementById('term-sheet');
+      var lastTrigger = null;
+      function closeSheet() { sheet.hidden = true; if (lastTrigger) { lastTrigger.focus(); lastTrigger = null; } }
+      document.addEventListener('click', function (e) {
+        var t = e.target.closest('[data-term]');
+        if (t && glossary[t.getAttribute('data-term')]) {
+          var entry = glossary[t.getAttribute('data-term')];
+          document.getElementById('term-title').textContent = entry.term;
+          document.getElementById('term-text').textContent = entry.text;
+          lastTrigger = t; sheet.hidden = false;
+          document.getElementById('term-close').focus();
+          return;
+        }
+        if (!sheet.hidden && !e.target.closest('#term-sheet [role=dialog]')) { closeSheet(); }
+      });
+      document.getElementById('term-close').addEventListener('click', closeSheet);
+      document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && !sheet.hidden) { closeSheet(); } });
+
+      // ---- Share button ----
+      Array.prototype.forEach.call(document.querySelectorAll('[data-share]'), function (btn) {
+        btn.addEventListener('click', function () {
+          var data = { title: btn.getAttribute('data-title'), text: btn.getAttribute('data-text'), url: location.href };
+          if (navigator.share) { navigator.share(data).catch(function () {}); return; }
+          var label = btn.querySelector('[data-share-label]');
+          var done = function () { if (label) { var old = label.textContent; label.textContent = 'Link copied'; setTimeout(function () { label.textContent = old; }, 1800); } };
+          if (navigator.clipboard) { navigator.clipboard.writeText(location.href).then(done, function () {}); }
+        });
+      });
+
+      // ---- Donut charts: hover, focus or tap a legend row or slice to highlight it ----
+      Array.prototype.forEach.call(document.querySelectorAll('[data-donut]'), function (chart) {
+        var num = chart.querySelector('[data-c-num]'), lab = chart.querySelector('[data-c-lab]');
+        var base = { n: num.textContent, l: lab.textContent };
+        function focusOn(idx) {
+          var seg = chart.querySelector('.donut-seg[data-idx="' + idx + '"]');
+          var row = chart.querySelector('[data-leg][data-idx="' + idx + '"]');
+          Array.prototype.forEach.call(chart.querySelectorAll('.donut-seg'), function (s) { s.removeAttribute('data-on'); });
+          seg.setAttribute('data-on', ''); chart.setAttribute('data-active', '');
+          num.textContent = row.getAttribute('data-count'); lab.textContent = row.getAttribute('data-label');
+        }
+        function reset() {
+          chart.removeAttribute('data-active');
+          Array.prototype.forEach.call(chart.querySelectorAll('.donut-seg'), function (s) { s.removeAttribute('data-on'); });
+          num.textContent = base.n; lab.textContent = base.l;
+        }
+        Array.prototype.forEach.call(chart.querySelectorAll('[data-idx]'), function (el) {
+          var idx = el.getAttribute('data-idx');
+          el.addEventListener('mouseenter', function () { focusOn(idx); });
+          el.addEventListener('focus', function () { focusOn(idx); });
+          el.addEventListener('mouseleave', reset);
+          el.addEventListener('blur', reset);
+          el.addEventListener('click', function () { focusOn(idx); });
+        });
+      });
     })();
   </script>
+  {% block scripts %}{% endblock %}
 </body>
 </html>

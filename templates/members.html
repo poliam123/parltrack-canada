@@ -1,0 +1,153 @@
+{% extends "base.html" %}
+{% from "_member.html" import member_card %}
+
+{% block title %}Members of Parliament | ParlTrack Canada{% endblock %}
+
+{% block intro %}Every sitting MP in the House of Commons, grouped by party. Search by name or riding, or find your own MP by postal code.{% endblock %}
+
+{% block content %}
+{% if error %}
+<div class="rounded-2xl bg-paper p-5 text-sm text-ink-800 shadow-sm ring-1 ring-ink-200" role="alert">
+  <p class="font-semibold">The member list couldn't be loaded.</p>
+  <p class="mt-1 text-ink-600">{{ error }}</p>
+  <p class="mt-3"><a class="font-semibold underline decoration-maple-600/60 underline-offset-2" href="{{ url_for('members_page') }}">Try again</a></p>
+</div>
+{% else %}
+
+{# ---------- Find your MP ---------- #}
+<section class="rise mb-5 rounded-2xl bg-paper p-5 shadow-sm ring-1 ring-ink-200" aria-labelledby="find-h">
+  <h2 id="find-h" class="font-serif text-lg font-semibold text-ink-900">Find your MP</h2>
+  <form method="get" action="{{ url_for('members_page') }}" class="mt-3 flex gap-2">
+    <label for="postal" class="sr-only">Postal code</label>
+    <input id="postal" name="postal" type="text" inputmode="text" autocomplete="postal-code" maxlength="7" value="{{ postal }}" placeholder="Postal code, e.g. K1A 0A9"
+           class="min-w-0 flex-1 rounded-lg border-0 bg-ink-50 px-3 py-2.5 text-sm uppercase text-ink-900 ring-1 ring-inset ring-ink-200 placeholder:normal-case placeholder:text-ink-400 focus:outline-none focus:ring-2 focus:ring-maple-600">
+    <button type="submit" class="rounded-lg bg-maple-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-maple-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink-800">Look up</button>
+  </form>
+  <p class="mt-2 text-xs text-ink-500">Your postal code is sent to Open North's Represent service to find your riding. ParlTrack doesn't store it. A few postal codes sit on a riding boundary, so check the result.</p>
+
+  {% if lookup %}
+  <div class="mt-4" aria-live="polite">
+    {% if lookup.matches %}
+    <p class="mb-3 text-sm text-ink-700">{{ lookup.postal }} is in <strong class="font-semibold text-ink-900">{{ lookup.ridings|join(' / ') }}</strong>.</p>
+    <ul class="grid gap-3">
+      {% for m in lookup.matches %}
+      {% set colour = party_colours.get(m.party, '#d6d7da') %}
+      <li>{{ member_card(m, colour) }}</li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="rounded-lg bg-ink-50 px-4 py-3 text-sm text-ink-800 ring-1 ring-inset ring-ink-200" role="alert">{{ lookup.error }}</p>
+    {% endif %}
+  </div>
+  {% endif %}
+</section>
+
+{# ---------- Browse ---------- #}
+<section class="mb-5 rounded-2xl bg-paper p-5 shadow-sm ring-1 ring-ink-200" aria-label="Search and filter members">
+  <div class="grid gap-3 sm:grid-cols-[1fr_14rem]">
+    <label class="block">
+      <span class="mb-1 block text-xs font-medium text-ink-500">Search by name or riding</span>
+      <input id="member-q" type="search" placeholder="e.g. Singh or Edmonton"
+             class="w-full rounded-lg border-0 bg-ink-50 px-3 py-2.5 text-sm text-ink-900 ring-1 ring-inset ring-ink-200 placeholder:text-ink-400 focus:outline-none focus:ring-2 focus:ring-maple-600">
+    </label>
+    <label class="block">
+      <span class="mb-1 block text-xs font-medium text-ink-500">Province or territory</span>
+      <select id="member-province" class="w-full rounded-lg border-0 bg-ink-50 py-2.5 pl-3 pr-8 text-sm text-ink-900 ring-1 ring-inset ring-ink-200 focus:outline-none focus:ring-2 focus:ring-maple-600">
+        <option value="">All</option>
+        {% for p in provinces %}<option value="{{ p }}">{{ p }}</option>{% endfor %}
+      </select>
+    </label>
+  </div>
+
+  <nav aria-label="Jump to a party" class="mt-4 flex flex-wrap gap-2">
+    {% for g in groups %}
+    <a href="#party-{{ g.slug }}" data-chip="{{ g.slug }}"
+       class="inline-flex items-center gap-2 rounded-full bg-ink-50 px-3 py-1.5 text-xs font-semibold text-ink-800 ring-1 ring-inset ring-ink-200 hover:bg-ink-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink-800">
+      <span class="swatch h-2.5 w-2.5 rounded-full" style="background: {{ g.colour }}" aria-hidden="true"></span>{{ g.party }}
+      <span class="tabular-nums text-ink-500" data-chip-count>{{ g.members|length }}</span>
+    </a>
+    {% endfor %}
+  </nav>
+
+  <p class="mt-4 flex flex-wrap items-center justify-between gap-2 text-xs text-ink-500">
+    <span id="member-status" aria-live="polite">Showing {{ member_total }} of {{ member_total }} MPs</span>
+    <a href="{{ export_url }}" download class="inline-flex items-center gap-1 text-ink-600 hover:text-ink-900">
+      <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0l-4-4m4 4l4-4M5 20h14"/></svg>Spreadsheet
+    </a>
+  </p>
+</section>
+
+{% if not has_contacts %}
+<p class="mb-5 rounded-xl bg-ink-50 px-4 py-3 text-sm text-ink-700 ring-1 ring-inset ring-ink-200">Photos and contact details are unavailable right now. Names, ridings and parties are still shown.</p>
+{% endif %}
+
+{% for g in groups %}
+<section id="party-{{ g.slug }}" data-party-section class="mb-8 scroll-mt-32" aria-labelledby="h-{{ g.slug }}">
+  <h2 id="h-{{ g.slug }}" class="mb-3 flex items-baseline gap-3 border-b-2 pb-2 font-serif text-xl font-semibold text-ink-900" style="border-color: {{ g.colour }}">
+    {{ g.party }}
+    <span class="text-sm font-normal text-ink-500"><span data-count>{{ g.members|length }}</span> MPs</span>
+  </h2>
+  <ul class="grid gap-3 sm:grid-cols-2">
+    {% for m in g.members %}
+    <li data-member data-province="{{ m.province }}" data-search="{{ m.search }}">{{ member_card(m, g.colour, loop.index0) }}</li>
+    {% endfor %}
+  </ul>
+</section>
+{% endfor %}
+
+<p id="member-empty" class="hidden rounded-2xl bg-paper p-5 text-sm text-ink-700 shadow-sm ring-1 ring-ink-200">No members match that search. Try part of a name, or clear the province filter.</p>
+
+<button id="to-top" type="button" aria-label="Back to top"
+        class="fixed bottom-[calc(1rem+env(safe-area-inset-bottom))] right-4 z-30 hidden h-11 w-11 items-center justify-center rounded-full bg-night text-white shadow-lg ring-1 ring-white/10 hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink-800">
+  <svg class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M10 15a1 1 0 0 1-1-1V7.4L6.7 9.7a1 1 0 0 1-1.4-1.4l4-4a1 1 0 0 1 1.4 0l4 4a1 1 0 1 1-1.4 1.4L11 7.4V14a1 1 0 0 1-1 1z" clip-rule="evenodd"/></svg>
+</button>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+  (function () {
+    var input = document.getElementById('member-q');
+    if (!input) { return; }
+    var province = document.getElementById('member-province');
+    var status = document.getElementById('member-status');
+    var empty = document.getElementById('member-empty');
+    var sections = Array.prototype.slice.call(document.querySelectorAll('[data-party-section]'));
+    var total = document.querySelectorAll('[data-member]').length;
+
+    function plain(s) { return s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase(); }
+
+    function apply() {
+      var term = plain(input.value.trim()), prov = province.value, shown = 0;
+      sections.forEach(function (sec) {
+        var any = 0;
+        Array.prototype.forEach.call(sec.querySelectorAll('[data-member]'), function (li) {
+          var ok = (!term || li.getAttribute('data-search').indexOf(term) !== -1) &&
+                   (!prov || li.getAttribute('data-province') === prov);
+          li.classList.toggle('hidden', !ok);
+          if (ok) { any++; shown++; }
+        });
+        sec.classList.toggle('hidden', !any);
+        sec.querySelector('[data-count]').textContent = any;
+        var chip = document.querySelector('[data-chip="' + sec.id.replace('party-', '') + '"]');
+        if (chip) {
+          chip.querySelector('[data-chip-count]').textContent = any;
+          chip.classList.toggle('opacity-40', !any);
+        }
+      });
+      status.textContent = 'Showing ' + shown + ' of ' + total + ' MPs';
+      empty.classList.toggle('hidden', shown > 0);
+    }
+    input.addEventListener('input', apply);
+    province.addEventListener('change', apply);
+
+    var top = document.getElementById('to-top');
+    window.addEventListener('scroll', function () {
+      var show = window.scrollY > 700;
+      top.classList.toggle('hidden', !show);
+      top.classList.toggle('inline-flex', show);
+    }, { passive: true });
+    top.addEventListener('click', function () { window.scrollTo({ top: 0 }); });
+  })();
+</script>
+{% endblock %}

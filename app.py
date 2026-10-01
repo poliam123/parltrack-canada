@@ -4,6 +4,10 @@ Pages
   /                              the 20 most recently active bills still moving
   /passed                        the 10 most recent bills with royal assent
   /bill/<session>/<number>       "Proposed changes": a readable 1-5 paragraph summary
+  /members                       directory of every sitting MP, by party, with photos and contacts
+  /compare                       two bills side by side
+  /glossary                      plain-language definitions
+  /export/*.csv                  spreadsheet downloads of the lists
   /following                     the bills you've starred (stored in your browser)
   /api/bill/<session>/<number>   JSON: sponsor, party, votes for one bill
   /stats                         charts: bill types, sponsors' parties, Parliament clock
@@ -19,6 +23,10 @@ Run locally:
 from __future__ import annotations
 
 import calendar
+import csv
+import io
+import unicodedata
+import xml.etree.ElementTree as ET
 import html as html_lib
 import json
 import os
@@ -31,7 +39,7 @@ from datetime import date, datetime, timezone
 from html.parser import HTMLParser
 
 import requests
-from flask import Flask, abort, jsonify, render_template, request, url_for
+from flask import Flask, Response, abort, jsonify, render_template, request, url_for
 
 LEGISINFO_URL = "https://www.parl.ca/legisinfo/en/bills/json"
 DOCUMENT_URL = "https://www.parl.ca/DocumentViewer/en/{session}/bill/{number}/{stage}"
@@ -355,6 +363,9 @@ def normalize(record: dict) -> dict | None:
         "active_date": parse_date(pick(record, DATE_KEYS)),
         "sort_date": best_date(record),
         "breakdown": build_breakdown(number, short, long, origin, current, status, stage, passed),
+        "dates": dates,
+        "stage_term": STAGE_TERMS.get(STAGES[stage_index(status)][0]) if stage_index(status) >= 0 else None,
+        "house_origin": is_house_origin(record, number),
         "type_label": label,
         "kind": kind,
         "pro_forma": is_pro_forma(record),
@@ -851,6 +862,9 @@ def parse_member_parties(page_html: str) -> dict[int, str]:
 
 def get_member_parties() -> dict[int, str]:
     """Current party of every sitting MP, keyed by PersonId. {} if it can't be read."""
+    directory = get_directory()
+    if directory["members"]:
+        return {m["id"]: m["party"] for m in directory["members"] if m["party"] and m["party"] != "Unknown"}
     with _members_fetch_lock:
         return _get_member_parties_locked()
 
@@ -939,20 +953,22 @@ def stats_rows(records: list[dict]) -> list[dict]:
 
 
 def make_donut(items: list[tuple[str, int, str]]) -> dict | None:
-    """Server-side donut: a CSS conic-gradient plus a legend with counts and percents."""
+    """Donut data for an SVG ring: each legend entry carries its arc (dash, gap, offset),
+    measured on a circle whose circumference is 100 so counts map straight to percent."""
     items = [(label, count, colour) for label, count, colour in items if count > 0]
     total = sum(count for _, count, _ in items)
     if not total:
         return None
-    stops, legend, running = [], [], 0
-    for label, count, colour in items:
-        start = running / total * 100
-        running += count
-        stops.append(f"{colour} {start:.3f}% {running / total * 100:.3f}%")
+    legend, running = [], 0.0
+    for idx, (label, count, colour) in enumerate(items):
+        length = count / total * 100
+        dash = length if len(items) == 1 else max(length - 0.6, 0.05)  # hairline gap between arcs
         pct = count / total * 100
-        legend.append({"label": label, "count": count, "colour": colour,
-                       "pct": "<1" if pct < 1 else f"{pct:.0f}"})
-    return {"total": total, "gradient": "conic-gradient(" + ", ".join(stops) + ")", "legend": legend}
+        legend.append({"idx": idx, "label": label, "count": count, "colour": colour,
+                       "pct": "<1" if pct < 1 else f"{pct:.0f}",
+                       "dash": round(dash, 3), "gap": round(100 - dash, 3), "offset": round(-running, 3)})
+        running += length
+    return {"total": total, "legend": legend}
 
 
 def type_donut(rows: list[dict]) -> dict | None:
@@ -1194,6 +1210,330 @@ def _fetched_at():
     return datetime.fromtimestamp(_cache["fetched_at"]) if _cache["fetched_at"] else None
 
 
+# --------------------------------------------------------------------------
+# Glossary: plain-language definitions shown in the pop-ups and on /glossary
+# --------------------------------------------------------------------------
+GLOSSARY = (
+    ("First reading", "The formal introduction of a bill. There is no debate on its content. The bill is simply put before the chamber and printed."),
+    ("Second reading", "Members debate the bill's main idea (its principle) and vote on whether it should go further. If it passes, the bill goes to committee."),
+    ("Committee stage", "A smaller group of MPs or senators studies the bill in detail, often hears from experts and the public, and can propose changes clause by clause."),
+    ("Report stage", "After committee, the whole chamber looks at any changes the committee made, and members can propose more amendments."),
+    ("Third reading", "The final debate and vote on the bill, as amended, in a chamber. If it passes, the bill moves to the other chamber or to royal assent."),
+    ("Royal assent", "The final step. The Governor General, or a deputy, signs a bill that has passed both chambers, and it becomes law. It may take effect right away or on a later date set in the bill."),
+    ("Coming into force", "The date a law actually takes effect. It can be the day of royal assent, a fixed date, or a date the government sets later by order."),
+    ("Government bill", "A bill introduced by a cabinet minister, usually to carry out the government's policy. Government bills get priority in House time."),
+    ("Private member's bill", "A bill introduced by an MP who isn't a cabinet minister. Few become law, because government bills take most of the House's time."),
+    ("Order of Precedence", "The ranked list of private members' bills eligible for debate in the House. Bills get a place by random draw. Bills outside the Order of Precedence are still waiting for a spot."),
+    ("Senate public bill", "A bill introduced in the Senate by a senator who isn't representing the government."),
+    ("Pro forma bill", "A placeholder bill (such as C-1 and S-1) introduced at the start of a session to assert Parliament's right to run its own business before it deals with the Speech from the Throne. It is never debated."),
+    ("Omnibus bill", "A very large bill that changes many laws at once, often on different subjects."),
+    ("Sponsor", "The MP or senator who introduces a bill and speaks for it."),
+    ("Recorded vote (division)", "A vote where each member's yes or no is counted and published. Paired members agree not to vote so that their absences cancel each other out."),
+    ("Confidence vote", "A vote the government must win to stay in power. Losing one can lead to an election."),
+    ("Prorogation", "The end of a session of Parliament without an election. Bills that haven't passed generally die and must be reintroduced."),
+    ("Dissolution", "The formal end of a Parliament, which triggers a federal election."),
+    ("Died on the Order Paper", "A bill that never finished before the session ended, so it stopped moving."),
+)
+
+
+def _slug(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
+
+
+GLOSSARY_BY_SLUG = {_slug(term): {"term": term, "text": text} for term, text in GLOSSARY}
+STAGE_TERMS = {"First reading": "first-reading", "Second reading": "second-reading",
+               "Committee": "committee-stage", "Report stage": "report-stage",
+               "Third reading": "third-reading", "Royal assent": "royal-assent"}
+
+
+@app.context_processor
+def inject_site_globals():
+    return {"glossary_data": GLOSSARY_BY_SLUG}
+
+
+# --------------------------------------------------------------------------
+# Member directory
+#
+# Two free sources, joined on the member's PersonId:
+#   * the House of Commons' own member list (XML): name, riding, province, current party
+#   * Open North's Represent API: photo, email, office phone numbers and addresses, website
+# If one is down, the directory still builds from the other with fewer details.
+# --------------------------------------------------------------------------
+XML_MEMBERS_URL = "https://www.ourcommons.ca/members/en/search/xml"
+REPRESENT_MPS_URL = "https://represent.opennorth.ca/representatives/house-of-commons/?limit=1000"
+POSTCODE_URL = "https://represent.opennorth.ca/postcodes/{code}/"
+DIRECTORY_TTL = 12 * 3600
+DIRECTORY_FAIL_TTL = 5 * 60
+POSTAL_RE = re.compile(r"^[A-Za-z]\d[A-Za-z]\s?\d[A-Za-z]\d$")
+PARTY_ORDER = ("Liberal", "Conservative", "Bloc Québécois", "NDP", "Green Party", "Independent")
+
+_directory_cache: dict = {"expires": 0.0, "members": [], "error": None, "contacts": False}
+_directory_lock = threading.Lock()
+_postal_cache: dict = {}
+
+
+def _strip_accents(text: str) -> str:
+    return "".join(c for c in unicodedata.normalize("NFKD", text) if not unicodedata.combining(c))
+
+
+def norm_riding(name: str) -> str:
+    """Riding names compared loosely: dash styles, accents, spacing and case don't matter."""
+    name = re.sub(r"[‐-―−]", "-", name or "")
+    return re.sub(r"[^a-z0-9]+", "", _strip_accents(name).lower())
+
+
+def parse_members_xml(text: str) -> dict[int, dict]:
+    """{PersonId: {...}} for every current member in the House's XML list."""
+    if not text or len(text) > 8_000_000:
+        return {}
+    try:
+        root = ET.fromstring(text)
+    except ET.ParseError:
+        return {}
+    now = datetime.now(timezone.utc)
+    out: dict[int, dict] = {}
+    for el in root.iter():
+        fields = {child.tag.split("}")[-1]: (child.text or "").strip() for child in el if len(child) == 0}
+        if "PersonId" not in fields or "ConstituencyName" not in fields or not fields["PersonId"].isdigit():
+            continue
+        ended = parse_date(fields.get("ToDateTime", ""))
+        if ended and ended < now:
+            continue  # a former member
+        raw_party = fields.get("CaucusShortName", "")
+        out[int(fields["PersonId"])] = {
+            "first": fields.get("PersonOfficialFirstName", ""),
+            "last": fields.get("PersonOfficialLastName", ""),
+            "riding": fields["ConstituencyName"],
+            "province": fields.get("ConstituencyProvinceTerritoryName", ""),
+            "party": canon_party(raw_party) or raw_party or "Unknown",
+        }
+    return out
+
+
+def _clean_tel(tel: str) -> str:
+    return re.sub(r"\s+", " ", tel or "").strip()
+
+
+def parse_represent(payload) -> dict[int, dict]:
+    """{PersonId: {...}} from Represent's list of House of Commons MPs."""
+    objs = payload.get("objects") if isinstance(payload, dict) else None
+    out: dict[int, dict] = {}
+    for obj in objs or []:
+        if not isinstance(obj, dict):
+            continue
+        match = re.search(r"\((\d+)\)", obj.get("url") or "")
+        if not match:
+            continue
+        hill_tel, const_tel, const_addr = "", "", []
+        for office in obj.get("offices") or []:
+            if not isinstance(office, dict):
+                continue
+            kind = (office.get("type") or "").lower()
+            tel = _clean_tel(office.get("tel") or "")
+            postal = re.sub(r"\s*\n\s*", ", ", (office.get("postal") or "").strip())
+            if "constituency" in kind:
+                const_tel = const_tel or tel
+                if postal and len(const_addr) < 2:
+                    const_addr.append(postal)
+            else:
+                hill_tel = hill_tel or tel
+        photo = obj.get("photo_url") or ""
+        out[int(match.group(1))] = {
+            "name": (obj.get("name") or "").strip(),
+            "party": canon_party(obj.get("party_name") or "") or (obj.get("party_name") or ""),
+            "riding": (obj.get("district_name") or "").strip(),
+            "email": (obj.get("email") or "").strip(),
+            "photo": photo if photo.startswith("https://") else "",
+            "website": (obj.get("personal_url") or "").strip(),
+            "profile": obj.get("url") or "",
+            "hill_tel": hill_tel, "const_tel": const_tel, "const_addr": const_addr,
+        }
+    return out
+
+
+def _initials(name: str) -> str:
+    parts = [p for p in re.split(r"[\s-]+", name) if p and p[0].isalpha()]
+    return (parts[0][0] + parts[-1][0]).upper() if len(parts) > 1 else name[:2].upper()
+
+
+def _name_sort_key(member: dict) -> str:
+    return _strip_accents(member["last"] or member["name"].split(" ")[-1]).lower() + _strip_accents(member["first"]).lower()
+
+
+def merge_directory(xml: dict[int, dict], rep: dict[int, dict]) -> list[dict]:
+    members = []
+    for pid in (xml.keys() if xml else rep.keys()):
+        x, r = xml.get(pid, {}), rep.get(pid, {})
+        name = r.get("name") or f"{x.get('first', '')} {x.get('last', '')}".strip()
+        last = x.get("last") or name.split(" ")[-1]
+        first = x.get("first") or name[: max(len(name) - len(last), 0)].strip()
+        party = x.get("party") or r.get("party") or "Unknown"
+        members.append({
+            "id": pid, "name": name, "first": first, "last": last,
+            "party": party, "riding": x.get("riding") or r.get("riding", ""),
+            "province": x.get("province", ""),
+            "email": r.get("email", ""), "photo": r.get("photo", ""),
+            "website": r.get("website", ""), "profile": r.get("profile", ""),
+            "hill_tel": r.get("hill_tel", ""), "const_tel": r.get("const_tel", ""),
+            "const_addr": r.get("const_addr", []),
+            "initials": _initials(name),
+            "search": _strip_accents(f"{name} {x.get('riding') or r.get('riding', '')} {x.get('province', '')} {party}").lower(),
+        })
+    members = [m for m in members if m["name"]]
+    members.sort(key=_name_sort_key)
+    return members
+
+
+def get_directory(force: bool = False) -> dict:
+    """{'members': [...], 'error': str|None, 'contacts': bool}, cached for 12 hours."""
+    now = time.time()
+    with _directory_lock:
+        if not force and now < _directory_cache["expires"]:
+            return _directory_cache
+        xml, rep, problems = {}, {}, []
+        try:
+            resp = requests.get(XML_MEMBERS_URL, timeout=25, headers={"User-Agent": "legis-bill-tracker/1.0"})
+            resp.raise_for_status()
+            xml = parse_members_xml(resp.content.decode("utf-8-sig", errors="replace"))
+        except requests.RequestException as exc:
+            problems.append(f"member list ({exc})")
+        try:
+            resp = requests.get(REPRESENT_MPS_URL, timeout=30,
+                                headers={"Accept": "application/json", "User-Agent": "legis-bill-tracker/1.0"})
+            resp.raise_for_status()
+            rep = parse_represent(json.loads(resp.content.decode("utf-8-sig")))
+        except (requests.RequestException, ValueError) as exc:
+            problems.append(f"contact details ({exc})")
+        members = merge_directory(xml, rep)
+        _directory_cache.update(
+            members=members,
+            contacts=bool(rep),
+            error=None if members else "Could not load the member list: " + "; ".join(problems),
+            expires=now + (DIRECTORY_TTL if members else DIRECTORY_FAIL_TTL),
+        )
+        return _directory_cache
+
+
+def party_groups(members: list[dict]) -> list[dict]:
+    """Members grouped by party: the biggest caucuses first, independents and others last."""
+    by_party: dict[str, list[dict]] = {}
+    for m in members:
+        by_party.setdefault(m["party"], []).append(m)
+
+    def order(party: str):
+        if party in PARTY_ORDER and party != "Independent":
+            return (0, -len(by_party[party]), party)
+        return (1, 0 if party == "Independent" else 1, party)
+
+    return [{"party": p, "slug": _slug(p), "colour": PARTY_COLOURS.get(p, OTHER_COLOUR), "members": by_party[p]}
+            for p in sorted(by_party, key=order)]
+
+
+def lookup_riding(postal: str) -> tuple[list[str], str | None]:
+    """Riding name(s) for a postal code via Represent. Returns (names, error message)."""
+    code = re.sub(r"\s+", "", postal).upper()
+    if not POSTAL_RE.match(code):
+        return [], "That doesn't look like a Canadian postal code. Try something like K1A 0A9."
+    now = time.time()
+    hit = _postal_cache.get(code)
+    if hit and now < hit[0]:
+        return hit[1], None
+    try:
+        resp = requests.get(POSTCODE_URL.format(code=code), timeout=12,
+                            headers={"Accept": "application/json", "User-Agent": "legis-bill-tracker/1.0"})
+        if resp.status_code == 404:
+            return [], "No riding was found for that postal code."
+        resp.raise_for_status()
+        data = resp.json()
+    except (requests.RequestException, ValueError):
+        return [], "The postal-code lookup is unavailable right now. Try again in a minute, or browse the list below."
+    names = []
+    for key in ("boundaries_centroid", "boundaries_concordance"):
+        for item in data.get(key) or []:
+            if isinstance(item, dict) and item.get("name") and item["name"] not in names:
+                names.append(item["name"])
+    if len(_postal_cache) > 500:
+        _postal_cache.clear()
+    _postal_cache[code] = (now + DIRECTORY_TTL, names)
+    return names, None if names else "No riding was found for that postal code."
+
+
+def find_my_mps(postal: str, members: list[dict]) -> dict:
+    names, error = lookup_riding(postal)
+    wanted = {norm_riding(n) for n in names}
+    matches = [m for m in members if norm_riding(m["riding"]) in wanted]
+    if not error and not matches:
+        error = ("Your riding is " + " / ".join(names) + ", but no sitting MP matched that name. "
+                 "Riding names changed recently, so search the list below by name or riding.")
+    return {"postal": re.sub(r"\s+", "", postal).upper(), "ridings": names, "matches": matches, "error": error}
+
+
+# --------------------------------------------------------------------------
+# Bill timeline (dates come from the list feed)
+# --------------------------------------------------------------------------
+def build_timeline(bill: dict) -> list[dict]:
+    dates = bill["dates"]
+    chambers = (("House", "House of Commons"), ("Senate", "Senate"))
+    if not bill["house_origin"]:
+        chambers = chambers[::-1]
+
+    steps: list[dict] = []
+    for key, where in chambers:
+        third = dates.get(f"Passed{key}ThirdReadingDateTime")
+        steps += [
+            {"label": "First reading", "where": where, "term": "first-reading",
+             "date": dates.get(f"Passed{key}FirstReadingDateTime"), "done": bool(dates.get(f"Passed{key}FirstReadingDateTime"))},
+            {"label": "Second reading", "where": where, "term": "second-reading",
+             "date": dates.get(f"Passed{key}SecondReadingDateTime"), "done": bool(dates.get(f"Passed{key}SecondReadingDateTime"))},
+            {"label": "Committee study", "where": where, "term": "committee-stage", "date": None, "done": bool(third)},
+            {"label": "Third reading", "where": where, "term": "third-reading", "date": third, "done": bool(third)},
+        ]
+    steps.append({"label": "Royal assent", "where": "Governor General", "term": "royal-assent",
+                  "date": bill["assent"], "done": bool(bill["passed"] or bill["assent"])})
+
+    still_moving = is_active(bill["status"]) and not bill["pro_forma"]
+    current_marked = False
+    for step in steps:
+        if step["done"]:
+            step["state"] = "done"
+        elif still_moving and not current_marked:
+            step["state"], current_marked = "current", True
+        else:
+            step["state"] = "upcoming"
+    return steps
+
+
+# --------------------------------------------------------------------------
+# CSV export
+# --------------------------------------------------------------------------
+def _safe_cell(value) -> str:
+    text = "" if value is None else str(value)
+    return "'" + text if text[:1] in ("=", "+", "-", "@", "\t", "\r") else text
+
+
+def csv_response(filename: str, header: list[str], rows: list[list]) -> Response:
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(header)
+    for row in rows:
+        writer.writerow([_safe_cell(c) for c in row])
+    response = Response("﻿" + buf.getvalue(), mimetype="text/csv")  # BOM so Excel reads accents
+    response.headers["Content-Disposition"] = f'attachment; filename="{filename}"'
+    return response
+
+
+def bills_csv(bills: list[dict], filename: str) -> Response:
+    header = ["Bill", "Short title", "Title", "Status", "Type", "Started in", "Currently in", "Topic",
+              "Introduced", "Royal assent", "Days to law", "Amends"]
+    rows = [[b["number"], b["short_title"], b["title"], b["status"], b["type_label"], b["chamber"],
+             b["current_chamber"], b["topic"],
+             b["introduced"].date().isoformat() if b["introduced"] else "",
+             b["assent"].date().isoformat() if b["assent"] else "",
+             b["days_to_law"] if b["days_to_law"] is not None else "",
+             "; ".join(b["amends"])] for b in bills]
+    return csv_response(filename, header, rows)
+
+
 def _int_arg(name: str, default: int, low: int, high: int) -> int:
     try:
         value = int(request.args.get(name, default))
@@ -1202,16 +1542,21 @@ def _int_arg(name: str, default: int, low: int, high: int) -> int:
     return max(low, min(high, value))
 
 
-@app.route("/")
-def index():
-    records, warning = fetch_records()
+def _active_filters() -> tuple[str, str, str, str]:
     chamber = request.args.get("chamber", "")
     kind = request.args.get("kind", "")
     sort = request.args.get("sort", "progress")
     q = request.args.get("q", "").strip()[:80]
-    chamber = chamber if chamber in ACTIVE_CHAMBERS else ""
-    kind = kind if kind in ACTIVE_KINDS else ""
-    sort = sort if sort in ACTIVE_SORTS else "progress"
+    return (chamber if chamber in ACTIVE_CHAMBERS else "",
+            kind if kind in ACTIVE_KINDS else "",
+            sort if sort in ACTIVE_SORTS else "progress",
+            q)
+
+
+@app.route("/")
+def index():
+    records, warning = fetch_records()
+    chamber, kind, sort, q = _active_filters()
     limit = _int_arg("limit", TOP_ACTIVE, TOP_ACTIVE, 400)
 
     matches = all_active_bills(records, chamber, kind, q, sort)
@@ -1230,6 +1575,7 @@ def index():
         more_url=more_url,
         chamber=chamber, kind=kind, sort=sort, q=q,
         filtered=bool(chamber or kind or q),
+        export_url=url_for("export_active", **{k: v for k, v in (("chamber", chamber), ("kind", kind), ("q", q), ("sort", sort)) if v}),
         stages=[label for label, _ in STAGES],
         warning=warning,
         total=len(records),
@@ -1250,6 +1596,7 @@ def passed():
         total_passed=len(everything),
         more_url=url_for("passed", limit=limit + TOP_PASSED) if len(everything) > limit else None,
         law_speed=time_to_law_summary(everything),
+        export_url=url_for("export_passed"),
         approximate=any(b["sort_date"] is None for b in bills),
         stages=[label for label, _ in STAGES],
         warning=warning,
@@ -1278,6 +1625,7 @@ def following():
         "following.html",
         active_tab=None,
         bills=bills,
+        export_url=url_for("export_following", b=",".join(wanted)) if bills else None,
         asked=len(wanted),
         stages=[label for label, _ in STAGES],
         warning=warning,
@@ -1361,6 +1709,8 @@ def bill_detail(parl_session: str, number: str):
         blocks=blocks,
         truncated=truncated,
         source=source,
+        timeline=build_timeline(bill) if bill else [],
+        share_text=(blocks[0]["text"] if blocks and blocks[0]["text"] else (bill["title"] if bill else ""))[:200],
         doc_url=DOCUMENT_URL.format(session=parl_session, number=number, stage="first-reading"),
         legis_url=LEGISINFO_BILL_URL.format(session=parl_session, number=number.lower()),
         warning=warning if not bill else None,
@@ -1425,6 +1775,145 @@ def stats_parties_api():
                        ready=snap["data"] is not None, error=snap["error"])
     response.headers["Cache-Control"] = "no-store"
     return response
+
+
+@app.route("/members")
+def members_page():
+    directory = get_directory()
+    members = directory["members"]
+    postal = request.args.get("postal", "").strip()[:12]
+    lookup = find_my_mps(postal, members) if postal and members else None
+    provinces = sorted({m["province"] for m in members if m["province"]})
+    return render_template(
+        "members.html",
+        active_tab="members",
+        page_width="max-w-4xl",
+        groups=party_groups(members),
+        party_colours=PARTY_COLOURS,
+        member_total=len(members),
+        provinces=provinces,
+        has_contacts=directory["contacts"],
+        error=directory["error"],
+        postal=postal,
+        lookup=lookup,
+        export_url=url_for("export_members"),
+        fetched_at=None,
+        total=0,
+    )
+
+
+@app.route("/compare")
+def compare():
+    records, warning = fetch_records()
+    bills = [b for b in (normalize(r) for r in records) if b and not b["pro_forma"] and b["number_ok"]]
+    bills.sort(key=lambda b: bill_sort_key(b["number"]))
+    by_number = {b["number"].upper(): b for b in bills}
+    picks = [by_number.get(request.args.get(k, "").strip().upper()) for k in ("a", "b")]
+
+    columns = []
+    for bill in picks:
+        if not bill:
+            columns.append(None)
+            continue
+        info = fetch_bill_json(bill["session"], bill["number"].upper())
+        party = None
+        if info and info["sponsor_id"]:
+            party = get_member_parties().get(info["sponsor_id"]) or canon_party(info["sponsor_caucus"] or "")
+        summary = ""
+        if info and info["summary_html"]:
+            blocks, _ = blocks_from_legisinfo(info["summary_html"])
+            summary = next((b["text"] for b in blocks if b["text"]), "")
+        days_open = None
+        if bill["introduced"] and not bill["passed"] and is_active(bill["status"]):
+            days_open = (datetime.now(timezone.utc) - bill["introduced"]).days
+        columns.append({"bill": bill, "info": info, "party": party, "summary": trim_text(summary, 380),
+                        "vote": ((info or {}).get("house_votes") or [None])[-1], "days_open": days_open})
+    def fmt(dt):
+        return dt.strftime("%B %-d, %Y") if dt else "\u2014"
+
+    def time_cell(c):
+        bill = c["bill"]
+        if bill["passed"]:
+            extra = f" ({bill['days_to_law']} days from first reading)" if bill["days_to_law"] is not None else ""
+            return f"Became law {fmt(bill['assent'])}{extra}"
+        if c["days_open"] is not None:
+            return f"{c['days_open']} days since it was introduced"
+        return "\u2014"
+
+    def sponsor_cell(c):
+        info = c["info"]
+        if not info or not info["sponsor_name"]:
+            return "\u2014"
+        return info["sponsor_name"] + (f", {c['party']}" if c["party"] else "")
+
+    def vote_cell(c):
+        vote = c["vote"]
+        return f"{vote['yeas']} for, {vote['nays']} against" if vote else "\u2014"
+
+    row_defs = (
+        ("Status", lambda c: c["bill"]["status"] or "\u2014"),
+        ("Type", lambda c: c["bill"]["type_label"]),
+        ("Started in", lambda c: c["bill"]["chamber"]),
+        ("Currently in", lambda c: c["bill"]["current_chamber"]),
+        ("Introduced", lambda c: fmt(c["bill"]["introduced"])),
+        ("Time", time_cell),
+        ("Topic", lambda c: c["bill"]["topic"]),
+        ("Amends", lambda c: ", ".join(c["bill"]["amends"]) or "\u2014"),
+        ("Sponsor", sponsor_cell),
+        ("Latest House vote", vote_cell),
+        ("Summary", lambda c: c["summary"] or "\u2014"),
+    )
+    rows = [(label, [fn(c) if c else "" for c in columns]) for label, fn in row_defs] if all(columns) else []
+    return render_template(
+        "compare.html",
+        active_tab=None,
+        options=bills,
+        columns=columns,
+        rows=rows,
+        selected=[b["number"] if b else "" for b in picks],
+        stages=[label for label, _ in STAGES],
+        warning=warning,
+        fetched_at=_fetched_at(),
+        total=len(records),
+    )
+
+
+@app.route("/glossary")
+def glossary():
+    return render_template("glossary.html", active_tab=None, terms=GLOSSARY, slugs=[_slug(t) for t, _ in GLOSSARY],
+                           fetched_at=None, total=0)
+
+
+@app.route("/export/active.csv")
+def export_active():
+    records, _ = fetch_records()
+    chamber, kind, sort, q = _active_filters()
+    return bills_csv(all_active_bills(records, chamber, kind, q, sort), "parltrack-active-bills.csv")
+
+
+@app.route("/export/passed.csv")
+def export_passed():
+    records, _ = fetch_records()
+    return bills_csv(recent_passed_bills(records, limit=10**6)[0], "parltrack-passed-bills.csv")
+
+
+@app.route("/export/following.csv")
+def export_following():
+    wanted = [p.strip().upper() for p in request.args.get("b", "").split(",")[:60]
+              if BILL_NUMBER_RE.match(p.strip())]
+    records, _ = fetch_records()
+    bills = [b for b in (normalize(r) for r in records) if b and b["number"].upper() in wanted]
+    return bills_csv(bills, "parltrack-my-bills.csv")
+
+
+@app.route("/export/members.csv")
+def export_members():
+    members = get_directory()["members"]
+    header = ["Name", "Party", "Riding", "Province", "Email", "Ottawa phone", "Constituency phone",
+              "Constituency address", "Website"]
+    rows = [[m["name"], m["party"], m["riding"], m["province"], m["email"], m["hill_tel"], m["const_tel"],
+             " | ".join(m["const_addr"]), m["website"]] for m in members]
+    return csv_response("parltrack-members.csv", header, rows)
 
 
 @app.route("/debug")

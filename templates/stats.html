@@ -1,18 +1,26 @@
 {% extends "base.html" %}
 
 {% macro donut(chart, label, centre_label) %}
-<div class="flex flex-col items-center gap-5 sm:flex-row sm:items-center">
-  <div class="relative h-40 w-40 shrink-0 rounded-full" style="background: {{ chart.gradient }}"
-       role="img" aria-label="{{ label }}: {% for item in chart.legend %}{{ item.label }} {{ item.count }}{% if not loop.last %}, {% endif %}{% endfor %}">
-    <div class="absolute inset-[2.1rem] flex flex-col items-center justify-center rounded-full bg-white">
-      <span class="text-2xl font-bold leading-none text-ink-900">{{ chart.total }}</span>
-      <span class="mt-1 text-[0.65rem] font-medium uppercase tracking-wide text-ink-500">{{ centre_label }}</span>
+<div data-donut class="flex flex-col items-center gap-6 sm:flex-row sm:items-center">
+  <div class="relative h-44 w-44 shrink-0">
+    <svg viewBox="0 0 42 42" class="h-full w-full -rotate-90" role="img"
+         aria-label="{{ label }}: {% for item in chart.legend %}{{ item.label }} {{ item.count }}{% if not loop.last %}, {% endif %}{% endfor %}">
+      <circle cx="21" cy="21" r="15.9155" fill="none" class="stroke-ink-100" stroke-width="6"/>
+      {% for item in chart.legend %}
+      <circle class="donut-seg" data-idx="{{ item.idx }}" cx="21" cy="21" r="15.9155" fill="none"
+              stroke="{{ item.colour }}" stroke-width="6" stroke-dasharray="{{ item.dash }} {{ item.gap }}" stroke-dashoffset="{{ item.offset }}"/>
+      {% endfor %}
+    </svg>
+    <div class="pointer-events-none absolute inset-0 flex flex-col items-center justify-center px-8 text-center" aria-hidden="true">
+      <span data-c-num class="font-serif text-3xl font-semibold leading-none text-ink-900">{{ chart.total }}</span>
+      <span data-c-lab class="mt-1.5 text-[0.65rem] font-medium uppercase leading-tight tracking-wide text-ink-500">{{ centre_label }}</span>
     </div>
   </div>
-  <ul class="w-full space-y-2 text-sm">
+  <ul class="w-full space-y-1 text-sm">
     {% for item in chart.legend %}
-    <li class="flex items-center gap-2.5">
-      <span class="h-3 w-3 shrink-0 rounded-sm ring-1 ring-inset ring-black/10" style="background: {{ item.colour }}" aria-hidden="true"></span>
+    <li data-leg data-idx="{{ item.idx }}" data-count="{{ item.count }}" data-label="{{ item.label }}" tabindex="0"
+        class="flex cursor-default items-center gap-2.5 rounded-lg px-2 py-1.5 hover:bg-ink-50 focus-visible:bg-ink-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ink-800">
+      <span class="swatch h-3 w-3 shrink-0 rounded-sm ring-1 ring-inset ring-black/10" style="background: {{ item.colour }}" aria-hidden="true"></span>
       <span class="flex-1 text-ink-800">{{ item.label }}</span>
       <span class="tabular-nums font-semibold text-ink-900">{{ item.count }}</span>
       <span class="w-10 text-right tabular-nums text-ink-500">{{ item.pct }}%</span>
@@ -30,22 +38,22 @@
 <div class="space-y-4">
 
   {# ---------- Parliament clock ---------- #}
-  <section class="overflow-hidden rounded-xl bg-white shadow-sm ring-1 ring-ink-200" aria-labelledby="clock-h">
+  <section class="rise overflow-hidden rounded-2xl bg-paper shadow-sm ring-1 ring-ink-200" aria-labelledby="clock-h">
     <div class="p-5">
-      <h2 id="clock-h" class="flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-maple-700">
+      <h2 id="clock-h" class="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.18em] text-maple-700">
         <span class="h-px w-6 bg-maple-600" aria-hidden="true"></span>This Parliament
       </h2>
       <p class="mt-3 text-sm text-ink-600">
         The {{ clock.parliament }} Parliament{% if clock.session %}, {{ clock.session }} session,{% endif %} first sat on
         <span class="font-medium text-ink-800">{{ clock.opened.strftime('%B %-d, %Y') }}</span>.
       </p>
-      <p class="mt-2 text-2xl font-bold leading-tight text-ink-900">{{ clock.elapsed_text }}</p>
+      <p class="mt-2 font-serif text-3xl font-semibold leading-tight text-ink-900">{{ clock.elapsed_text }}</p>
       <p class="text-sm text-ink-500">{{ '{:,}'.format(clock.elapsed_days) }} days since it opened</p>
 
       <div class="mt-5" role="img"
            aria-label="{{ clock.pct_label }} percent of the way from the opening of Parliament to the scheduled election">
         <div class="h-3 overflow-hidden rounded-full bg-ink-200" aria-hidden="true">
-          <div class="h-full rounded-full bg-maple-600" style="width: {{ clock.pct }}%"></div>
+          <div class="grow h-full rounded-full bg-maple-600" style="width: {{ clock.pct }}%"></div>
         </div>
         <div class="mt-1.5 flex justify-between text-xs text-ink-500" aria-hidden="true">
           <span>{{ clock.opened.strftime('%b %Y') }}</span>
@@ -83,8 +91,8 @@
   </section>
 
   {# ---------- Bill types ---------- #}
-  <section class="rounded-xl bg-white p-5 shadow-sm ring-1 ring-ink-200" aria-labelledby="types-h">
-    <h2 id="types-h" class="text-base font-semibold text-ink-900">What kind of bills are these?</h2>
+  <section class="rise rounded-2xl bg-paper p-5 shadow-sm ring-1 ring-ink-200 sm:p-6" aria-labelledby="types-h">
+    <h2 id="types-h" class="font-serif text-lg font-semibold text-ink-900">What kind of bills are these?</h2>
     <p class="mt-1 mb-4 text-sm text-ink-600">
       Every bill in this Parliament by type. Government bills come from the cabinet.
       Private members' bills come from individual MPs who aren't in cabinet.
@@ -97,8 +105,8 @@
   </section>
 
   {# ---------- Party of origin ---------- #}
-  <section class="rounded-xl bg-white p-5 shadow-sm ring-1 ring-ink-200" aria-labelledby="party-h">
-    <h2 id="party-h" class="text-base font-semibold text-ink-900">Which parties do the bills come from?</h2>
+  <section class="rise rounded-2xl bg-paper p-5 shadow-sm ring-1 ring-ink-200 sm:p-6" aria-labelledby="party-h">
+    <h2 id="party-h" class="font-serif text-lg font-semibold text-ink-900">Which parties do the bills come from?</h2>
     <p class="mt-1 mb-4 text-sm text-ink-600">
       House of Commons bills, by the party of the MP who introduced them.
     </p>
@@ -146,7 +154,7 @@
           then the chart is saved for 12 hours.
         </p>
         <div class="mt-3 h-2 overflow-hidden rounded-full bg-ink-200" aria-hidden="true">
-          <div id="party-bar" class="h-full rounded-full bg-maple-600 transition-all" style="width: 4%"></div>
+          <div id="party-bar" class="grow h-full rounded-full bg-maple-600 transition-all" style="width: 4%"></div>
         </div>
         <p class="mt-1.5 text-xs text-ink-500" id="party-count">Starting&hellip;</p>
       </div>
@@ -155,8 +163,8 @@
 
   {# ---------- House vs Senate ---------- #}
   {% if origin and origin.donut %}
-  <section class="rounded-xl bg-white p-5 shadow-sm ring-1 ring-ink-200" aria-labelledby="origin-h">
-    <h2 id="origin-h" class="text-base font-semibold text-ink-900">House or Senate: where do bills start?</h2>
+  <section class="rise rounded-2xl bg-paper p-5 shadow-sm ring-1 ring-ink-200 sm:p-6" aria-labelledby="origin-h">
+    <h2 id="origin-h" class="font-serif text-lg font-semibold text-ink-900">House or Senate: where do bills start?</h2>
     <p class="mt-1 mb-4 text-sm text-ink-600">Most bills start in the House of Commons, but either chamber can introduce them.</p>
     {{ donut(origin.donut, 'Bills by chamber of origin', 'bills') }}
     <dl class="mt-5 grid grid-cols-2 gap-3 text-sm">
@@ -182,8 +190,8 @@
 
   {# ---------- Where bills stand ---------- #}
   {% if stage_bars %}
-  <section class="rounded-xl bg-white p-5 shadow-sm ring-1 ring-ink-200" aria-labelledby="stand-h">
-    <h2 id="stand-h" class="text-base font-semibold text-ink-900">Where the bills stand</h2>
+  <section class="rise rounded-2xl bg-paper p-5 shadow-sm ring-1 ring-ink-200 sm:p-6" aria-labelledby="stand-h">
+    <h2 id="stand-h" class="font-serif text-lg font-semibold text-ink-900">Where the bills stand</h2>
     <p class="mt-1 mb-4 text-sm text-ink-600">{{ bill_total }} bills so far, grouped by what has happened to them.</p>
     <ul class="space-y-3">
       {% for bar in stage_bars %}
@@ -193,7 +201,7 @@
           <span class="tabular-nums font-semibold text-ink-900">{{ bar.count }}</span>
         </div>
         <div class="mt-1 h-2.5 overflow-hidden rounded-full bg-ink-100" aria-hidden="true">
-          <div class="h-full rounded-full {{ 'bg-maple-600' if bar.label == 'Became law' else 'bg-ink-600' }}" style="width: {{ bar.width }}%"></div>
+          <div class="grow h-full rounded-full {{ 'bg-maple-600' if bar.label == 'Became law' else 'bg-ink-600' }}" style="width: {{ bar.width }}%"></div>
         </div>
       </li>
       {% endfor %}
@@ -203,8 +211,8 @@
 
   {# ---------- Passage rate ---------- #}
   {% if outcomes %}
-  <section class="rounded-xl bg-white p-5 shadow-sm ring-1 ring-ink-200" aria-labelledby="rate-h">
-    <h2 id="rate-h" class="text-base font-semibold text-ink-900">How many make it into law?</h2>
+  <section class="rise rounded-2xl bg-paper p-5 shadow-sm ring-1 ring-ink-200 sm:p-6" aria-labelledby="rate-h">
+    <h2 id="rate-h" class="font-serif text-lg font-semibold text-ink-900">How many make it into law?</h2>
     <p class="mt-1 mb-3 text-sm text-ink-600">Outcome by bill type. Many bills are still moving, so these rates will rise.</p>
     <ul class="mb-5 space-y-3">
       {% for row in outcomes %}
@@ -257,15 +265,15 @@
 
   {# ---------- Laws by month ---------- #}
   {% if monthly %}
-  <section class="rounded-xl bg-white p-5 shadow-sm ring-1 ring-ink-200" aria-labelledby="month-h">
-    <h2 id="month-h" class="text-base font-semibold text-ink-900">When did bills become law?</h2>
+  <section class="rise rounded-2xl bg-paper p-5 shadow-sm ring-1 ring-ink-200 sm:p-6" aria-labelledby="month-h">
+    <h2 id="month-h" class="font-serif text-lg font-semibold text-ink-900">When did bills become law?</h2>
     <p class="mt-1 mb-4 text-sm text-ink-600">Royal assents by month{% if law_speed %}. On average a bill took {{ law_speed.average }} days from first reading to law{% endif %}.</p>
     <ul class="space-y-2">
       {% for m in monthly %}
       <li class="flex items-center gap-3 text-sm">
         <span class="w-16 shrink-0 text-ink-600">{{ m.label }}</span>
         <div class="h-3 flex-1 overflow-hidden rounded-full bg-ink-100" aria-hidden="true">
-          <div class="h-full rounded-full bg-maple-600" style="width: {{ m.width }}%"></div>
+          <div class="grow h-full rounded-full bg-maple-600" style="width: {{ m.width }}%"></div>
         </div>
         <span class="w-6 text-right tabular-nums font-semibold text-ink-900">{{ m.count }}</span>
       </li>
@@ -276,8 +284,8 @@
 
   {# ---------- Topics ---------- #}
   {% if topics %}
-  <section class="rounded-xl bg-white p-5 shadow-sm ring-1 ring-ink-200" aria-labelledby="topic-h">
-    <h2 id="topic-h" class="text-base font-semibold text-ink-900">What are the bills about?</h2>
+  <section class="rise rounded-2xl bg-paper p-5 shadow-sm ring-1 ring-ink-200 sm:p-6" aria-labelledby="topic-h">
+    <h2 id="topic-h" class="font-serif text-lg font-semibold text-ink-900">What are the bills about?</h2>
     <p class="mt-1 mb-4 text-sm text-ink-600">Sorted by keywords in each bill's title, so this is a rough guide. Bills fit one group only.</p>
     <ul class="space-y-3">
       {% for tp in topics %}
@@ -287,7 +295,7 @@
           <span class="tabular-nums font-semibold text-ink-900">{{ tp.count }}</span>
         </div>
         <div class="mt-1 h-2.5 overflow-hidden rounded-full bg-ink-100" aria-hidden="true">
-          <div class="h-full rounded-full bg-ink-600" style="width: {{ tp.width }}%"></div>
+          <div class="grow h-full rounded-full bg-ink-600" style="width: {{ tp.width }}%"></div>
         </div>
       </li>
       {% endfor %}
@@ -297,8 +305,8 @@
 
   {# ---------- Recently introduced ---------- #}
   {% if recent %}
-  <section class="rounded-xl bg-white p-5 shadow-sm ring-1 ring-ink-200" aria-labelledby="recent-h">
-    <h2 id="recent-h" class="text-base font-semibold text-ink-900">Introduced in the last {{ recent.days }} days</h2>
+  <section class="rise rounded-2xl bg-paper p-5 shadow-sm ring-1 ring-ink-200 sm:p-6" aria-labelledby="recent-h">
+    <h2 id="recent-h" class="font-serif text-lg font-semibold text-ink-900">Introduced in the last {{ recent.days }} days</h2>
     {% if recent.count %}
     <p class="mt-1 mb-3 text-sm text-ink-600">{{ recent.count }} new bill{{ '' if recent.count == 1 else 's' }}{% if recent.count > recent.bills|length %}; the newest {{ recent.bills|length }} are listed{% endif %}.</p>
     <ul class="divide-y divide-ink-100">
