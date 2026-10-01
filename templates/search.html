@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+
+{% block title %}{% if q %}{{ q }} · {% endif %}Search | ParlTrack Canada{% endblock %}
+
+{% block intro %}Search bills, MPs, senators, committees, regulations and the glossary. Try a bill number like C-15, a riding, a name or a topic.{% endblock %}
+
+{% macro group(title, count) %}
+<section class="rise mb-6" aria-label="{{ title }}">
+  <h2 class="mb-2 flex items-center gap-2 text-xs font-bold uppercase tracking-[0.18em] text-ink-700">
+    <span class="h-px w-6 bg-ink-400" aria-hidden="true"></span>{{ title }} <span class="font-semibold text-ink-500">{{ count }}</span>
+  </h2>
+  <ul class="divide-y divide-ink-100 rounded-2xl bg-paper shadow-sm ring-1 ring-ink-200">
+    {{ caller() }}
+  </ul>
+</section>
+{% endmacro %}
+
+{% block content %}
+<form method="get" action="{{ url_for('search_page') }}" role="search" class="mb-6 flex gap-2">
+  <label for="q" class="sr-only">Search ParlTrack</label>
+  <input id="q" name="q" type="search" value="{{ q }}" maxlength="100" placeholder="Search bills, MPs, committees…" {% if not q %}autofocus{% endif %}
+         class="min-w-0 flex-1 rounded-lg border-0 bg-paper px-3 py-2.5 text-sm text-ink-900 ring-1 ring-inset ring-ink-200 placeholder:text-ink-400 focus:outline-none focus:ring-2 focus:ring-maple-600">
+  <button type="submit" class="rounded-lg bg-maple-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-maple-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink-800">Search</button>
+</form>
+
+{% if results is not none %}
+  {% if not total %}
+  <p class="rounded-2xl bg-paper p-5 text-sm text-ink-700 shadow-sm ring-1 ring-ink-200">Nothing matched “{{ q }}”. Try fewer words, or a bill number like C-15.</p>
+  {% else %}
+  <p class="mb-4 text-sm text-ink-600">{{ total }} result{{ '' if total == 1 else 's' }} for “{{ q }}”.</p>
+
+  {% if results.bills %}
+  {% call group('Bills', results.bills|length) %}
+    {% for b in results.bills %}
+    <li class="p-3 sm:px-4">
+      <a href="{{ url_for('bill_detail', parl_session=b.session, number=b.number) }}" class="font-semibold text-ink-900 hover:text-maple-700">{{ b.number }}{% if b.short_title %} · {{ b.short_title }}{% endif %}</a>
+      {% if b.title and b.title != b.short_title %}<p class="text-sm text-ink-700">{{ b.title }}</p>{% endif %}
+      <p class="text-xs text-ink-500">{{ b.status }}</p>
+    </li>
+    {% endfor %}
+  {% endcall %}
+  {% endif %}
+
+  {% if results.members %}
+  {% call group('MPs', results.members|length) %}
+    {% for m in results.members %}
+    <li class="flex items-center gap-3 p-3 sm:px-4">
+      <span class="h-2.5 w-2.5 shrink-0 rounded-full" style="background: {{ party_colours.get(m.party, '#d6d7da') }}" aria-hidden="true"></span>
+      <div class="min-w-0">
+        <a href="{{ url_for('member_page', pid=m.id) }}" class="font-semibold text-ink-900 hover:text-maple-700">{{ m.name }}</a>
+        <p class="text-xs text-ink-500">{{ m.party }} · {{ m.riding }}{% if m.province %}, {{ m.province }}{% endif %}</p>
+      </div>
+    </li>
+    {% endfor %}
+  {% endcall %}
+  {% endif %}
+
+  {% if results.senators %}
+  {% call group('Senators', results.senators|length) %}
+    {% for s in results.senators %}
+    <li class="p-3 sm:px-4">
+      <a href="{{ url_for('senate_page') }}" class="font-semibold text-ink-900 hover:text-maple-700">{{ s.name }}</a>
+      <p class="text-xs text-ink-500">{{ s.group }} · {{ s.province }}</p>
+    </li>
+    {% endfor %}
+  {% endcall %}
+  {% endif %}
+
+  {% if results.committees %}
+  {% call group('Committees', results.committees|length) %}
+    {% for c in results.committees %}
+    <li class="flex items-center gap-3 p-3 sm:px-4">
+      <span class="inline-flex h-6 min-w-[3rem] shrink-0 items-center justify-center rounded-md bg-night px-2 text-[0.7rem] font-bold tracking-wider text-white">{{ c.acr }}</span>
+      <a href="{{ url_for('committee_page', acr=c.acr) }}" class="font-semibold text-ink-900 hover:text-maple-700">{{ c.name or c.acr }}</a>
+    </li>
+    {% endfor %}
+  {% endcall %}
+  {% endif %}
+
+  {% if results.regulations %}
+  {% call group('Regulations', results.regulations|length) %}
+    {% for r in results.regulations %}
+    <li class="p-3 sm:px-4">
+      <a href="{{ r.url }}" target="_blank" rel="noopener" class="font-semibold text-ink-900 hover:text-maple-700">{{ r.title }}</a>
+      <p class="text-xs text-ink-500">{{ r.kind }}{% if r.number %} · {{ r.number }}{% endif %}{% if r.act %} · under the {{ r.act }}{% endif %}</p>
+    </li>
+    {% endfor %}
+  {% endcall %}
+  {% endif %}
+
+  {% if results.glossary %}
+  {% call group('Glossary', results.glossary|length) %}
+    {% for g in results.glossary %}
+    <li class="p-3 sm:px-4">
+      <a href="{{ url_for('glossary') }}#{{ g.slug }}" class="font-semibold text-ink-900 hover:text-maple-700">{{ g.term }}</a>
+      <p class="text-sm text-ink-700">{{ g.text }}</p>
+    </li>
+    {% endfor %}
+  {% endcall %}
+  {% endif %}
+  {% endif %}
+{% endif %}
+{% endblock %}

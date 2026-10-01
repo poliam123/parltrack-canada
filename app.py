@@ -5,6 +5,8 @@ Pages
   /passed                        the 10 most recent bills with royal assent
   /bill/<session>/<number>       "Proposed changes": a readable 1-5 paragraph summary
   /members                       directory of every sitting MP, by party, with photos and contacts
+  /members/<id>                  one MP: contact details and their recorded votes
+  /search?q=                     search bills, MPs, senators, committees, regulations and the glossary
   /compare                       two bills side by side
   /glossary                      plain-language definitions
   /export/*.csv                  spreadsheet downloads of the lists
@@ -1207,6 +1209,228 @@ def _run_party_job(records: list[dict]) -> None:
     except Exception as exc:  # any failure must leave the page usable
         with _party_lock:
             _party_state.update(status="error", finished=time.time(), error=str(exc))
+
+
+# --------------------------------------------------------------------------
+# MP voting records: the House of Commons publishes each member's recorded
+# votes (divisions) as XML, one request per member.
+# --------------------------------------------------------------------------
+MEMBER_VOTES_URL = "https://www.ourcommons.ca/members/en/{slug}({pid})/votes/xml"
+MEMBER_VOTES_PAGE = "https://www.ourcommons.ca/members/en/{slug}({pid})/votes"
+DIVISION_URL = "https://www.ourcommons.ca/members/en/votes/{parl}/{sess}/{num}"
+VOTES_TTL = 3 * 3600
+VOTES_FAIL_TTL = 5 * 60
+
+_member_votes_cache: dict = {}
+_member_votes_lock = threading.Lock()
+
+
+def member_slug(first: str, last: str) -> str:
+    """'Marie-Hélène Gaudreau' -> 'marie-helene-gaudreau', the House's own style."""
+    return re.sub(r"[^a-z0-9]+", "-", _strip_accents(f"{first} {last}").lower()).strip("-")
+
+
+def _xml_records(text: str, must_have: str) -> list[dict]:
+    """Flat {tag: text} dicts for every element that has a `must_have` child."""
+    if not text or len(text) > 8_000_000:
+        return []
+    try:
+        root = ET.fromstring(text)
+    except ET.ParseError:
+        return []
+    out = []
+    for el in root.iter():
+        fields = {child.tag.split("}")[-1]: (child.text or "").strip() for child in el if len(child) == 0}
+        if must_have in fields:
+            out.append(fields)
+    return out
+
+
+def parse_member_votes(text: str) -> list[dict]:
+    votes = []
+    for f in _xml_records(text, "DecisionDivisionNumber"):
+        num = f.get("DecisionDivisionNumber", "")
+        when = f.get("DecisionEventDateTime", "")
+        if not num.isdigit() or len(when) < 10:
+            continue
+        try:
+            day = date.fromisoformat(when[:10])
+        except ValueError:
+            continue
+        value = f.get("VoteValueName") or ""
+        if not value:
+            value = "Paired" if f.get("IsVotePaired") == "true" else "Yea" if f.get("IsVoteYea") == "true" \
+                else "Nay" if f.get("IsVoteNay") == "true" else ""
+        parl, sess = f.get("ParliamentNumber", ""), f.get("SessionNumber", "")
+        bill = f.get("BillNumberCode", "")
+        votes.append({
+            "number": int(num), "date": day, "subject": f.get("DecisionDivisionSubject", ""),
+            "vote": value, "result": f.get("DecisionResultName", ""), "bill": bill if BILL_NUMBER_RE.match(bill) else "",
+            "session": f"{parl}-{sess}" if parl.isdigit() and sess.isdigit() else CURRENT_SESSION,
+            "url": DIVISION_URL.format(parl=parl, sess=sess, num=num) if parl.isdigit() and sess.isdigit() else "",
+        })
+    votes.sort(key=lambda v: (v["date"], v["number"]), reverse=True)
+    return votes
+
+
+def get_member_votes(member: dict) -> tuple[list[dict], str | None]:
+    pid = member["id"]
+    now = time.time()
+    with _member_votes_lock:
+        hit = _member_votes_cache.get(pid)
+        if hit and now < hit[0]:
+            return hit[1], hit[2]
+    url = MEMBER_VOTES_URL.format(slug=member_slug(member["first"], member["last"]), pid=pid)
+    votes, error = [], None
+    try:
+        resp = requests.get(url, timeout=25, headers={"User-Agent": "legis-bill-tracker/1.0"})
+        resp.raise_for_status()
+        votes = parse_member_votes(resp.content.decode("utf-8-sig", errors="replace"))
+        if not votes and b"MemberVote" not in resp.content:
+            error = "The House of Commons returned no voting record for this member."
+    except requests.RequestException:
+        error = "The House of Commons didn't answer just now. Try again in a few minutes."
+    with _member_votes_lock:
+        if len(_member_votes_cache) > 400:
+            _member_votes_cache.clear()
+        _member_votes_cache[pid] = (now + (VOTES_FAIL_TTL if error else VOTES_TTL), votes, error)
+    return votes, error
+
+
+def vote_counts(votes: list[dict]) -> dict:
+    c = Counter(v["vote"] for v in votes)
+    return {"total": len(votes), "yea": c.get("Yea", 0), "nay": c.get("Nay", 0), "paired": c.get("Paired", 0),
+            "bills": sum(bool(v["bill"]) for v in votes)}
+
+
+# --------------------------------------------------------------------------
+# What each House committee is studying (its "Work" page on ourcommons.ca)
+# --------------------------------------------------------------------------
+COMMITTEE_WORK_URL = "https://www.ourcommons.ca/Committees/en/{acr}/Work"
+STUDY_LINK_RE = re.compile(r"StudyActivity\?studyActivityId=\d+", re.IGNORECASE)
+BILL_IN_TITLE_RE = re.compile(r"^Bill ([CS]-\d+)\b", re.IGNORECASE)
+WORK_TTL = 6 * 3600
+
+_committee_work_cache: dict = {}
+_committee_work_lock = threading.Lock()
+
+
+def parse_committee_work(page_html: str, base_url: str) -> dict:
+    """{'studies': [...], 'activities': [...]} in page order. Bills studied appear among the studies."""
+    out = {"studies": [], "activities": []}
+    section, seen = None, set()
+    for tok in _tokenize(page_html).tokens:
+        if tok[0] == "text":
+            low = tok[1].strip().lower()
+            if low in ("studies", "studies and activities"):
+                section = "studies"
+            elif low == "activities":
+                section = "activities"
+            continue
+        url = _abs_url(tok[1], base_url)
+        title = tok[2].strip()
+        if not title or not STUDY_LINK_RE.search(url) or url in seen:
+            continue
+        seen.add(url)
+        m = BILL_IN_TITLE_RE.match(title)
+        out[section or "studies"].append({"title": title, "url": url, "bill": m.group(1).upper() if m else ""})
+    return out
+
+
+def get_committee_work(acr: str) -> dict | None:
+    now = time.time()
+    with _committee_work_lock:
+        hit = _committee_work_cache.get(acr)
+        if hit and now < hit[0]:
+            return hit[1]
+    url = COMMITTEE_WORK_URL.format(acr=acr)
+    data = None
+    try:
+        resp = requests.get(url, timeout=20, headers={"User-Agent": "legis-bill-tracker/1.0"})
+        resp.raise_for_status()
+        data = parse_committee_work(resp.text, url)
+        if not data["studies"] and not data["activities"]:
+            data = None
+    except requests.RequestException:
+        data = None
+    with _committee_work_lock:
+        _committee_work_cache[acr] = (now + (WORK_TTL if data else COMMITTEE_FAIL_TTL), data)
+    return data
+
+
+def committee_work_view(work: dict | None, records: list[dict], senate: bool = False) -> dict | None:
+    """Splits the committee's studies into bills it has now, bills it studied before, and other studies."""
+    if not work:
+        return None
+    by_number = {}
+    for rec in records:
+        b = normalize(rec)
+        if b and b["session"] == CURRENT_SESSION:
+            by_number[b["number"].upper()] = b
+    now, earlier, other = [], [], []
+    for s in work["studies"]:
+        if not s["bill"]:
+            other.append(s)
+            continue
+        bill = by_number.get(s["bill"])
+        item = {**s, "info": bill}
+        low = (bill or {}).get("status", "").lower()
+        here = "senate" in low if senate else "senate" not in low
+        if bill and is_active(bill["status"]) and "committee" in low and here:
+            now.append(item)
+        else:
+            earlier.append(item)
+    return {"bills_now": now, "bills_before": earlier, "studies": other}
+
+
+# --------------------------------------------------------------------------
+# Site search: bills, MPs, senators, committees, regulations and glossary terms
+# --------------------------------------------------------------------------
+SEARCH_LIMIT = 25
+BILL_QUERY_RE = re.compile(r"^\s*([cs])\s*-?\s*(\d{1,4})\s*$", re.IGNORECASE)
+
+
+def _fold(text: str) -> str:
+    return _strip_accents(text or "").lower()
+
+
+def _matches(words: list[str], haystack: str) -> bool:
+    return all(w in haystack for w in words)
+
+
+def run_search(q: str) -> dict:
+    q = (q or "").strip()[:100]
+    words = [w for w in re.split(r"[\s,]+", _fold(q)) if w]
+    results = {"bills": [], "members": [], "senators": [], "committees": [], "regulations": [], "glossary": []}
+    if not words:
+        return results
+
+    exact = BILL_QUERY_RE.match(q)
+    records, _ = fetch_records()
+    bills = [b for b in (normalize(r) for r in records) if b and b["number_ok"] and not b["pro_forma"]]
+    if exact:
+        code = f"{exact.group(1).upper()}-{int(exact.group(2))}"
+        hits = [b for b in bills if b["number"].upper() == code]
+    else:
+        hits = [b for b in bills if _matches(words, _fold(f"{b['number']} {b['short_title']} {b['title']}"))]
+    hits.sort(key=lambda b: (b["session"] != CURRENT_SESSION, not is_active(b["status"]), bill_sort_key(b["number"])))
+    results["bills"] = hits[:SEARCH_LIMIT]
+
+    if not exact:
+        members = get_directory()["members"]
+        results["members"] = [m for m in members if _matches(words, m["search"])][:SEARCH_LIMIT]
+        senators = get_senators()["senators"]
+        results["senators"] = [s for s in senators if _matches(words, s["search"])][:SEARCH_LIMIT]
+        committees = get_committee_list()
+        results["committees"] = [c for c in committees if _matches(words, _fold(f"{c['acr']} {c['name']}"))][:SEARCH_LIMIT]
+        snap = reg_snapshot()
+        if snap["data"]:
+            regs = [(r, "Open for comment") for r in snap["data"]["proposed"]] + [(r, "Final") for r in snap["data"]["final"]]
+            results["regulations"] = [{**r, "kind": k} for r, k in regs
+                                      if _matches(words, _fold(f"{r['title']} {r['act']} {r['dept']} {r['number']}"))][:SEARCH_LIMIT]
+        results["glossary"] = [{"term": t, "text": x, "slug": _slug(t)} for t, x in GLOSSARY
+                               if _matches(words, _fold(f"{t} {x}"))][:10]
+    return results
 
 
 # --------------------------------------------------------------------------
@@ -2736,6 +2960,41 @@ def regulations_status_api():
     return response
 
 
+@app.route("/members/<int:pid>")
+def member_page(pid: int):
+    directory = get_directory()
+    member = next((m for m in directory["members"] if m["id"] == pid), None)
+    if member is None:
+        abort(404)
+    votes, error = get_member_votes(member)
+    show = request.args.get("show", "all")
+    if show not in ("all", "bills"):
+        show = "all"
+    shown = [v for v in votes if v["bill"]] if show == "bills" else votes
+    return render_template(
+        "member.html",
+        active_tab="members",
+        section="house",
+        m=member,
+        colour=PARTY_COLOURS.get(member["party"], OTHER_COLOUR),
+        votes=shown[:200],
+        more=max(len(shown) - 200, 0),
+        counts=vote_counts(votes),
+        show=show,
+        error=error,
+        official_votes=MEMBER_VOTES_PAGE.format(slug=member_slug(member["first"], member["last"]), pid=pid),
+    )
+
+
+@app.route("/search")
+def search_page():
+    q = request.args.get("q", "").strip()[:100]
+    results = run_search(q) if q else None
+    total = sum(len(v) for v in results.values()) if results else 0
+    return render_template("search.html", active_tab="", q=q, results=results, total=total,
+                           party_colours=PARTY_COLOURS)
+
+
 @app.route("/members")
 def members_page():
     directory = get_directory()
@@ -2807,12 +3066,16 @@ def committee_page(acr: str):
         for pid, role in data["people"]:
             if pid in by_id:
                 roster.setdefault(role, []).append(by_id[pid])
+    records, _ = fetch_records()
+    work = committee_work_view(get_committee_work(acr), records)
     return render_template(
         "committee.html",
         active_tab="members",
         page_width="max-w-4xl",
         section="committees",
         acr=acr,
+        work=work,
+        work_url=COMMITTEE_WORK_URL.format(acr=acr),
         name=(data or {}).get("name") or ("Standing Committee on " + COMMITTEE_NAMES[acr] if acr in COMMITTEE_NAMES else acr),
         roster=roster,
         roster_total=sum(len(v) for v in roster.values()),
