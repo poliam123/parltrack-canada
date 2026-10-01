@@ -1,0 +1,79 @@
+{
+  "_about": "Figures for the /stats/budget page. Amounts are in billions of dollars. Every number comes from the budget document cited in 'sources'. To show a new budget, replace the figures and sources; the page is built entirely from this file.",
+
+  "name": "Budget 2025: Canada Strong",
+  "tabled": "2025-11-04",
+  "focus_year": "2025–26",
+
+  "fiscal_years":     ["2024–25", "2025–26", "2026–27", "2027–28", "2028–29", "2029–30"],
+  "revenues_by_year": [511.0, 507.5, 523.2, 541.3, 560.2, 583.3],
+  "expenses_by_year": [547.3, 585.9, 588.6, 604.8, 618.1, 639.8],
+  "balance_by_year":  [-36.3, -78.3, -65.4, -63.5, -57.9, -56.6],
+
+  "spending": [
+    {"label": "Seniors' benefits", "value": 83.1, "note": "Elderly benefits"},
+    {"label": "Employment Insurance benefits", "value": 30.5, "note": ""},
+    {"label": "Canada Child Benefit", "value": 30.1, "note": ""},
+    {"label": "Health and social transfers to provinces", "value": 76.4, "note": "Canada Health Transfer $54.7B, Canada Social Transfer $17.4B, health agreements with provinces and territories $4.3B"},
+    {"label": "Equalization and territorial funding", "value": 31.7, "note": "Equalization $26.2B, Territorial Formula Financing $5.5B"},
+    {"label": "Other transfer payments", "value": 115.6, "note": "Grants and contributions paid by federal departments and agencies"},
+    {"label": "Running federal departments and agencies", "value": 150.2, "note": "Other direct program expenses, including National Defence"},
+    {"label": "Interest on the debt", "value": 55.6, "note": "Public debt charges"},
+    {"label": "Everything else", "value": 12.7, "note": "Other transfers to provinces, territories and municipalities ($2.7B net), pollution pricing proceeds returned to Canadians ($5.0B), and net actuarial losses on public pensions ($5.0B)"}
+  ],
+
+  "revenue": [
+    {"label": "Personal income tax", "value": 237.9, "note": ""},
+    {"label": "Corporate income tax", "value": 97.1, "note": ""},
+    {"label": "Goods and Services Tax (GST)", "value": 54.4, "note": ""},
+    {"label": "Employment Insurance premiums", "value": 32.2, "note": ""},
+    {"label": "Other taxes and duties", "value": 36.8, "note": "Non-resident income tax $13.7B, other excise taxes and duties $13.2B, customs import duties $9.9B"},
+    {"label": "Other revenues", "value": 49.1, "note": "Non-tax revenues, as grouped in the budget"}
+  ],
+
+  "new_money": {
+    "years": "2025–26 to 2029–30",
+    "chapters": [
+      {"label": "Protecting Canada's sovereignty and security", "chapter": 4, "total": 62.875},
+      {"label": "Empowering Canadians", "chapter": 3, "total": 48.132},
+      {"label": "Shifting from reliance to resilience", "chapter": 2, "total": 16.534},
+      {"label": "Building a stronger Canadian economy", "chapter": 1, "total": 13.3},
+      {"label": "Creating a more efficient and effective government", "chapter": 5, "total": -51.202}
+    ]
+  },
+
+  "major_changes_shown": 8,
+  "major_changes_note": "Ranked by five-year cost or savings as shown in each chapter's table of measures. Some entries are groups of related measures, named as the budget names them. Chapter 1's measures ($13.3 billion in total) are not itemized here.",
+  "major_changes": [
+    {"label": "Rebuilding, Rearming, and Reinvesting in the Canadian Armed Forces", "chapter": 4, "kind": "Spending", "total": 56.622, "url": "https://budget.canada.ca/2025/report-rapport/chap4-en.html"},
+    {"label": "Comprehensive Expenditure Review", "chapter": 5, "kind": "Savings", "total": -44.217, "years": "2026–27 to 2029–30", "url": "https://budget.canada.ca/2025/report-rapport/chap5-en.html"},
+    {"label": "Middle-Class Tax Cut", "chapter": 3, "kind": "Tax cut", "total": 27.245, "url": "https://budget.canada.ca/2025/report-rapport/chap3-en.html"},
+    {"label": "Optimizing Productivity in Government", "chapter": 5, "kind": "Savings", "total": -7.75, "url": "https://budget.canada.ca/2025/report-rapport/chap5-en.html"},
+    {"label": "Launching Build Canada Homes", "chapter": 3, "kind": "Spending", "total": 7.284, "url": "https://budget.canada.ca/2025/report-rapport/chap3-en.html"},
+    {"label": "Equipping Companies for Growth and Diversification", "chapter": 2, "kind": "Spending", "total": 6.499, "url": "https://budget.canada.ca/2025/report-rapport/chap2-en.html"},
+    {"label": "Supporting Workers", "chapter": 2, "kind": "Spending", "total": 4.939, "url": "https://budget.canada.ca/2025/report-rapport/chap2-en.html"},
+    {"label": "A New Trade Infrastructure Strategy", "chapter": 2, "kind": "Spending", "total": 4.15, "url": "https://budget.canada.ca/2025/report-rapport/chap2-en.html"},
+    {"label": "Eliminating the GST for First-Time Home Buyers", "chapter": 3, "kind": "Tax cut", "total": 3.91, "url": "https://budget.canada.ca/2025/report-rapport/chap3-en.html"}
+  ],
+
+  "implementation": [
+    {"bill": "C-15", "session": "45-1", "title": "Budget 2025 Implementation Act, No. 1", "status": "Received Royal Assent on March 26, 2026", "statute": "SC 2026, c 3"}
+  ],
+
+  "later_updates": [
+    {"label": "Spring Economic Update", "date": "2026-04-28", "note": "The government updated its economic and fiscal outlook after this budget. The figures on this page are the budget's own."}
+  ],
+
+  "pbo": {
+    "label": "Parliamentary Budget Officer: reports and analysis",
+    "url": "https://www.pbo-dpb.ca/en/publications",
+    "note": "The PBO is an independent, nonpartisan officer of Parliament who analyzes the government's budgets and cost estimates."
+  },
+
+  "sources": [
+    {"label": "Budget 2025, Annex 1, Tables A1.8 (revenue outlook) and A1.9 (expense outlook)", "url": "https://budget.canada.ca/2025/report-rapport/anx1-en.html"},
+    {"label": "Budget 2025, Annex 1, Table A1.3 (Budget 2025 measures by chapter)", "url": "https://budget.canada.ca/2025/report-rapport/anx1-en.html"},
+    {"label": "Budget 2025, chapters 2 to 5: tables of measures", "url": "https://budget.canada.ca/2025/report-rapport/toc-tdm-en.html"},
+    {"label": "Department of Finance: Bill C-15 receives Royal Assent (March 26, 2026)", "url": "https://www.canada.ca/en/department-finance/news/2026/03/legislation-passes-to-implement-budget-2025-canada-strong.html"}
+  ]
+}

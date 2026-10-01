@@ -307,4 +307,24 @@
     };
     setTimeout(poll, 1500);
   }
+
+  /* ---- Regulations page: poll while the Gazette is being read, then reload once ---- */
+  var regPending = $('#reg-pending');
+  if (regPending) {
+    var rbar = $('#reg-bar'), rcount = $('#reg-count'), rtries = 0;
+    var rpoll = function () {
+      rtries++;
+      getJson(regPending.getAttribute('data-url'))
+        .then(function (d) {
+          if ((d.ready && d.status !== 'running') || d.status === 'error') { location.reload(); return; }
+          if (d.total) {
+            rbar.style.width = Math.max(4, Math.round(d.done / d.total * 100)) + '%';
+            rcount.textContent = d.done + ' of ' + d.total + ' notices read';
+          }
+          if (rtries < 100) { setTimeout(rpoll, 3000); }
+        })
+        .catch(function () { if (rtries < 100) { setTimeout(rpoll, 5000); } });
+    };
+    setTimeout(rpoll, 1500);
+  }
 })();

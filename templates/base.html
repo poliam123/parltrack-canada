@@ -56,11 +56,11 @@
         </button>
       </div>
 
-      <nav aria-label="Sections" class="grid grid-cols-4 gap-1 pb-2.5">
-        {% for key, label, endpoint in (('active', 'Active', 'index'), ('passed', 'Passed', 'passed'), ('stats', 'Stats', 'stats'), ('members', 'Members', 'members_page')) %}
+      <nav aria-label="Sections" class="grid grid-cols-5 gap-1 pb-2.5">
+        {% for key, label, short, endpoint in (('active', 'Active', 'Active', 'index'), ('passed', 'Passed', 'Passed', 'passed'), ('regulations', 'Regulations', 'Regs', 'regulations_page'), ('stats', 'Stats', 'Stats', 'stats'), ('members', 'Members', 'Members', 'members_page')) %}
         <a href="{{ url_for(endpoint) }}" {% if active_tab == key %}aria-current="page"{% endif %}
            class="rounded-lg px-1 py-2 text-center text-[0.8125rem] font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white
-                  {{ 'bg-white text-neutral-900' if active_tab == key else 'text-white/70 hover:bg-white/10 hover:text-white' }}">{{ label }}</a>
+                  {{ 'bg-white text-neutral-900' if active_tab == key else 'text-white/70 hover:bg-white/10 hover:text-white' }}">{% if short != label %}<span class="sm:hidden">{{ short }}</span><span class="hidden sm:inline">{{ label }}</span>{% else %}{{ label }}{% endif %}</a>
         {% endfor %}
       </nav>
     </div>

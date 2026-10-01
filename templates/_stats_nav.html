@@ -1,0 +1,7 @@
+<nav aria-label="Statistics sections" class="mb-5 inline-flex rounded-full bg-ink-100 p-1 text-sm font-semibold">
+  {% for key, label, endpoint in (('bills', 'Bills and Parliament', 'stats'), ('budget', 'Federal budget', 'budget_page')) %}
+  <a href="{{ url_for(endpoint) }}" {% if stats_section == key %}aria-current="page"{% endif %}
+     class="rounded-full px-4 py-1.5 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink-800
+            {{ 'bg-paper text-ink-900 shadow-sm' if stats_section == key else 'text-ink-600 hover:text-ink-900' }}">{{ label }}</a>
+  {% endfor %}
+</nav>

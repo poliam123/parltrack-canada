@@ -11,6 +11,8 @@ Pages
   /following                     the bills you've starred (stored in your browser)
   /api/bill/<session>/<number>   JSON: sponsor, party, votes for one bill
   /stats                         charts: bill types, sponsors' parties, Parliament clock
+  /stats/budget                  the most recent federal budget: spending, revenue, deficit, biggest changes
+  /regulations                   proposed regulations open for comment and new final regulations (Canada Gazette)
   /summary/<session>/<number>    JSON: official 3-sentence summary of a bill
   /api/stats/parties             JSON: progress of the party-chart job
   /debug, /healthz               troubleshooting and hosting checks
@@ -36,8 +38,9 @@ import threading
 import time
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from html.parser import HTMLParser
+from urllib.parse import urljoin
 
 import requests
 from flask import Flask, Response, abort, jsonify, render_template, request, url_for
@@ -1207,6 +1210,508 @@ def _run_party_job(records: list[dict]) -> None:
 
 
 # --------------------------------------------------------------------------
+# Canada Gazette: proposed regulations (Part I) and final regulations (Part II)
+#
+# The Gazette has RSS feeds that list issues, not regulations, so the job reads
+# each recent issue's table of contents, then each regulation's own page for its
+# official summary (the "Issues" part of the Regulatory Impact Analysis
+# Statement) and, for proposals, the comment period. Routine instruments are
+# left out. Pages never change once published, so each one is fetched once.
+# If the Gazette changes its page layout, start with gazette_issue_links(),
+# parse_p1_index(), parse_p2_index() and parse_regulation_page().
+# --------------------------------------------------------------------------
+GAZETTE_RSS = {
+    "p1": "https://gazette.gc.ca/rss/p1-eng.xml",
+    "p2": "https://gazette.gc.ca/rss/p2-eng.xml",
+}
+GAZETTE_YEAR_INDEX = "https://gazette.gc.ca/rp-pr/{part}/{year}/index-eng.html"
+GAZETTE_HOME = "https://gazette.gc.ca/accueil-home-eng.html"
+GAZETTE_UA = {"User-Agent": "legis-bill-tracker/1.0 (ParlTrack Canada)"}
+REG_TTL = 6 * 3600
+REG_RETRY_AFTER = 15 * 60
+REG_WORKERS = 4
+P1_LOOKBACK_DAYS = 100   # comment periods run up to 75 days; a margin covers late issues
+P2_LOOKBACK_DAYS = 42    # about three bi-weekly issues of final regulations
+PROPOSED_CLOSED_GRACE = 0
+
+ISSUE_LINK_RE = re.compile(
+    r"/rp-pr/(p[12])/(\d{4})/(\d{4}-\d{2}-\d{2})(?:-x\d+)?/html/index-eng\.html", re.IGNORECASE)
+P1_REG_LINK_RE = re.compile(r"/html/reg\d+-eng\.html$", re.IGNORECASE)
+P2_REG_LINK_RE = re.compile(r"/html/(sor-dors|si-tr)(\d+)-eng\.html$", re.IGNORECASE)
+REGISTRATION_RE = re.compile(r"\b(SOR|SI)/(\d{4})-(\d+)\b(?:\s+([A-Z][a-z]+\.? \d{1,2}, \d{4}))?")
+COMMENT_DAYS_RE = re.compile(r"within (\d{1,3}) days after the (?:date of )?publication", re.IGNORECASE)
+EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
+ACT_HEADING_RE = re.compile(r"\b(Act|Code|Charter)\b(?:,\s*\d{4})?|\bLoi\b", re.IGNORECASE)
+SUMMARY_LABELS = re.compile(
+    r"\b(Description|Rationale|Objective|Objectives|Cost-benefit statement|Issues and objectives|"
+    r"One-for-one rule|Small business lens|Background)\s*:", re.IGNORECASE)
+
+# Routine instruments that are left out entirely (agreed list).
+ROUTINE_RE = re.compile(
+    r"domestic substances list|non-domestic substances list|privileges and immunities|"
+    r"proclamation designating|miscellaneous program|\berrat(um|a)\b|\bcorrecting\b|"
+    r"correction of (an )?error",
+    re.IGNORECASE)
+
+SMALL_WORDS = {"a", "an", "and", "as", "at", "by", "for", "in", "of", "on", "or", "the", "to", "with"}
+
+_reg_state: dict = {"status": "idle", "done": 0, "total": 0, "data": None, "finished": 0.0, "error": None}
+_reg_lock = threading.Lock()
+_gazette_pages: dict = {}          # url -> parsed result; published pages don't change
+_gazette_pages_lock = threading.Lock()
+
+
+class _GazetteTokens(HTMLParser):
+    """Turns a page into ("text", str) and ("link", href, text) tokens, plus plain lines of text."""
+
+    BLOCK = {"p", "div", "li", "tr", "br", "h1", "h2", "h3", "h4", "h5", "h6", "dt", "dd", "section", "table", "ul", "ol"}
+    SKIP = {"script", "style", "nav", "noscript"}
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.tokens: list[tuple] = []
+        self.lines: list[str] = []
+        self._buf: list[str] = []
+        self._line: list[str] = []
+        self._href: str | None = None
+        self._skip = 0
+
+    def _flush_text(self):
+        text = re.sub(r"\s+", " ", "".join(self._buf)).strip()
+        self._buf = []
+        if text:
+            self.tokens.append(("text", text))
+
+    def _flush_line(self):
+        line = re.sub(r"\s+", " ", "".join(self._line)).strip()
+        self._line = []
+        if line:
+            self.lines.append(line)
+
+    def handle_starttag(self, tag, attrs):
+        if tag in self.SKIP:
+            self._skip += 1
+            return
+        if tag == "a":
+            self._flush_text()
+            self._href = dict(attrs).get("href") or ""
+            self._buf = []
+        elif tag in self.BLOCK:
+            self._flush_text()
+            self._flush_line()
+
+    def handle_endtag(self, tag):
+        if tag in self.SKIP:
+            self._skip = max(self._skip - 1, 0)
+            return
+        if tag == "a" and self._href is not None:
+            text = re.sub(r"\s+", " ", "".join(self._buf)).strip()
+            self.tokens.append(("link", self._href, text))
+            self._buf, self._href = [], None
+        elif tag in self.BLOCK:
+            self._flush_text()
+            self._flush_line()
+
+    def handle_data(self, data):
+        if self._skip:
+            return
+        self._buf.append(data)
+        self._line.append(data)
+
+    def close(self):
+        super().close()
+        self._flush_text()
+        self._flush_line()
+
+
+def _tokenize(page_html: str) -> _GazetteTokens:
+    parser = _GazetteTokens()
+    parser.feed(page_html)
+    parser.close()
+    return parser
+
+
+def _gazette_get(url: str) -> str | None:
+    try:
+        resp = requests.get(url, timeout=25, headers=GAZETTE_UA)
+        resp.raise_for_status()
+        return resp.content.decode("utf-8", errors="replace")
+    except requests.RequestException:
+        return None
+
+
+def _abs_url(href: str, base: str) -> str:
+    return urljoin(base, href)
+
+
+def tidy_act_name(raw: str) -> str:
+    """'FARM PRODUCTS AGENCIES ACT' -> 'Farm Products Agencies Act'. Mixed-case names are left alone."""
+    raw = raw.strip(" .")
+    if raw != raw.upper():
+        return raw
+    words = raw.lower().split()
+    out = []
+    for i, w in enumerate(words):
+        if i and w in SMALL_WORDS:
+            out.append(w)
+        else:
+            out.append("-".join(p[:1].upper() + p[1:] for p in w.split("-")))
+    return " ".join(out)
+
+
+def gazette_issue_links(part: str, since: date, rss_xml: str | None = None) -> list[tuple[date, str]]:
+    """(issue date, index URL) for issues of Part I or II published on or after `since`, newest first."""
+    found: dict[str, date] = {}
+
+    def take(url: str):
+        m = ISSUE_LINK_RE.search(url)
+        if m and m.group(1).lower() == part:
+            d = date.fromisoformat(m.group(3))
+            if d >= since:
+                found[_abs_url(m.group(0), "https://gazette.gc.ca")] = d
+
+    xml = rss_xml if rss_xml is not None else _gazette_get(GAZETTE_RSS[part])
+    if xml:
+        try:
+            root = ET.fromstring(xml.encode("utf-8"))
+            for link in root.iter("link"):
+                take((link.text or "").strip())
+        except ET.ParseError:
+            pass
+    if not found:  # fall back to the year's list of issues
+        for year in sorted({since.year, date.today().year}):
+            page = _gazette_get(GAZETTE_YEAR_INDEX.format(part=part, year=year))
+            for tok in _tokenize(page).tokens if page else []:
+                if tok[0] == "link":
+                    take(_abs_url(tok[1], GAZETTE_YEAR_INDEX.format(part=part, year=year)))
+    return sorted(((d, u) for u, d in found.items()), reverse=True)
+
+
+def parse_p1_index(page_html: str, base_url: str) -> list[dict]:
+    """Proposed regulations in a Part I issue, with the department and act headings above each one."""
+    out, started, dept, act = [], False, "", ""
+    for tok in _tokenize(page_html).tokens:
+        if tok[0] == "text":
+            text = tok[1]
+            low = text.lower()
+            if low.startswith("proposed regulations"):
+                started, dept, act = True, "", ""
+                continue
+            if not started:
+                continue
+            if low in ("supplements", "index", "miscellaneous notices", "government notices") or low.startswith("index"):
+                started = False
+                continue
+            if len(text) > 160 or len(text) < 3 or re.fullmatch(r"[\d\s,.–-]+", text):
+                continue  # page numbers and stray fragments, not headings
+            text = text.strip("() ")
+            if ACT_HEADING_RE.search(text):
+                act = text
+            else:
+                dept, act = text, ""
+        elif started and tok[2] and P1_REG_LINK_RE.search(_abs_url(tok[1], base_url)):
+            out.append({"title": tok[2], "url": _abs_url(tok[1], base_url), "dept": dept, "act": act})
+    return out
+
+
+def parse_p2_index(page_html: str, base_url: str) -> list[dict]:
+    """Regulations and other statutory instruments listed in a Part II issue."""
+    out, seen = [], set()
+    for tok in _tokenize(page_html).tokens:
+        if tok[0] != "link":
+            continue
+        url = _abs_url(tok[1], base_url)
+        m = P2_REG_LINK_RE.search(url)
+        if not m or not tok[2]:
+            continue
+        if url in seen:
+            continue
+        seen.add(url)
+        kind = "SOR" if m.group(1).lower().startswith("sor") else "SI"
+        out.append({"title": tok[2], "url": url, "kind": kind, "seq": int(m.group(2))})
+    return out
+
+
+def _first_sentences(text: str, max_sentences: int = 2, max_chars: int = 420) -> str:
+    text = re.sub(r"\s+", " ", text).strip()
+    parts = re.split(r"(?<=[.!?])\s+(?=[A-Z(\"“])", text)
+    out = ""
+    for p in parts[:max_sentences]:
+        if out and len(out) + len(p) + 1 > max_chars:
+            break
+        out = f"{out} {p}".strip()
+    return out if len(out) <= max_chars else out[:max_chars].rsplit(" ", 1)[0] + "…"
+
+
+def parse_regulation_page(page_html: str) -> dict:
+    """Registration number and date, enabling act, official summary and comment period from one page."""
+    lines = _tokenize(page_html).lines
+    full = "\n".join(lines)
+    info: dict = {"number": "", "registered": None, "act": "", "summary": "", "comment_days": None, "email": ""}
+
+    matches = list(REGISTRATION_RE.finditer(full))
+    reg = next((m for m in matches if m.group(4)), matches[0] if matches else None)  # prefer the dated one
+    if reg:
+        info["number"] = f"{reg.group(1)}/{reg.group(2)}-{reg.group(3)}"
+        if reg.group(4):
+            try:
+                info["registered"] = datetime.strptime(reg.group(4).replace(".", ""), "%B %d, %Y").date()
+            except ValueError:
+                info["registered"] = None
+        # The enabling act is the first all-capitals heading after the registration line.
+        start = next((i for i, l in enumerate(lines) if reg.group(0) in l), None)
+        if start is not None:
+            for line in lines[start + 1:start + 6]:
+                letters = re.sub(r"[^A-Za-z]", "", line)
+                if len(letters) > 6 and line == line.upper() and ACT_HEADING_RE.search(line):
+                    info["act"] = tidy_act_name(line)
+                    break
+
+    # Official summary: the "Issues:" part of the executive summary, or the first paragraph under "Issues".
+    m = re.search(r"\bIssues\s*:\s*(.+)", full)
+    if m:
+        body = m.group(1)
+        label = SUMMARY_LABELS.search(body)
+        body = body[:label.start()] if label else body
+        info["summary"] = _first_sentences(body.replace("\n", " "))
+    else:
+        for i, line in enumerate(lines):
+            if line.strip().lower() in ("issues", "issue", "background") and i + 1 < len(lines):
+                info["summary"] = _first_sentences(lines[i + 1])
+                break
+
+    days = COMMENT_DAYS_RE.search(full)
+    if days:
+        info["comment_days"] = int(days.group(1))
+        email = EMAIL_RE.search(full[days.end():days.end() + 2500])
+        if email:
+            info["email"] = email.group(0).rstrip(".")
+    return info
+
+
+def _parsed_page(url: str) -> dict | None:
+    with _gazette_pages_lock:
+        if url in _gazette_pages:
+            return _gazette_pages[url]
+    page = _gazette_get(url)
+    if page is None:
+        return None
+    parsed = parse_regulation_page(page)
+    with _gazette_pages_lock:
+        if len(_gazette_pages) > 2000:
+            _gazette_pages.clear()
+        _gazette_pages[url] = parsed
+    return parsed
+
+
+def is_routine(title: str) -> bool:
+    return bool(ROUTINE_RE.search(title))
+
+
+def reg_snapshot() -> dict:
+    with _reg_lock:
+        return dict(_reg_state)
+
+
+def ensure_reg_job() -> None:
+    now = time.time()
+    with _reg_lock:
+        if _reg_state["status"] == "running":
+            return
+        if _reg_state["data"] is not None and now - _reg_state["finished"] < REG_TTL:
+            return
+        if _reg_state["status"] == "error" and now - _reg_state["finished"] < REG_RETRY_AFTER:
+            return
+        _reg_state.update(status="running", done=0, total=0, error=None)
+    threading.Thread(target=_run_reg_job, daemon=True).start()
+
+
+def build_regulations(today: date | None = None, fetch_index=None, fetch_page=None, issues=None) -> dict:
+    """Collect proposed and final regulations. The fetch arguments exist so the parsing can be tested offline."""
+    today = today or date.today()
+    fetch_index = fetch_index or _gazette_get
+    fetch_page = fetch_page or _parsed_page
+    issues = issues or {
+        "p1": gazette_issue_links("p1", today - timedelta(days=P1_LOOKBACK_DAYS)),
+        "p2": gazette_issue_links("p2", today - timedelta(days=P2_LOOKBACK_DAYS)),
+    }
+    if not issues["p1"] and not issues["p2"]:
+        raise RuntimeError("The Canada Gazette did not list any recent issues")
+
+    pending = []  # (kind, issue_date, toc_entry)
+    failed_issues = 0
+    for issue_date, url in issues["p1"]:
+        page = fetch_index(url)
+        if page is None:
+            failed_issues += 1
+            continue
+        pending += [("proposed", issue_date, e) for e in parse_p1_index(page, url) if not is_routine(e["title"])]
+    for issue_date, url in issues["p2"]:
+        page = fetch_index(url)
+        if page is None:
+            failed_issues += 1
+            continue
+        pending += [("final", issue_date, e) for e in parse_p2_index(page, url) if not is_routine(e["title"])]
+    total_issues = len(issues["p1"]) + len(issues["p2"])
+    if total_issues and failed_issues > total_issues / 2:
+        raise RuntimeError(f"The Canada Gazette did not answer for {failed_issues} of {total_issues} issues")
+
+    with _reg_lock:
+        _reg_state["total"] = len(pending)
+
+    def work(item):
+        kind, issue_date, entry = item
+        return kind, issue_date, entry, fetch_page(entry["url"])
+
+    results = []
+    with ThreadPoolExecutor(max_workers=REG_WORKERS) as pool:
+        for fut in as_completed([pool.submit(work, p) for p in pending]):
+            results.append(fut.result())
+            with _reg_lock:
+                _reg_state["done"] = len(results)
+
+    proposed, final = [], []
+    for kind, issue_date, entry, page in results:
+        page = page or {}
+        item = {
+            "title": entry["title"],
+            "url": entry["url"],
+            "published": issue_date,
+            "act": entry.get("act") or page.get("act", ""),
+            "dept": entry.get("dept", ""),
+            "summary": page.get("summary", ""),
+            "number": page.get("number", ""),
+            "registered": page.get("registered"),
+            "comment_days": page.get("comment_days"),
+            "email": page.get("email", ""),
+            "deadline": None,
+            "days_left": None,
+        }
+        if kind == "proposed":
+            if item["comment_days"]:
+                item["deadline"] = issue_date + timedelta(days=item["comment_days"])
+                item["days_left"] = (item["deadline"] - today).days
+                if item["days_left"] < -PROPOSED_CLOSED_GRACE:
+                    continue  # comment period is over
+            proposed.append(item)
+        else:
+            if not item["number"]:
+                m = P2_REG_LINK_RE.search(entry["url"])
+                item["number"] = f"{entry['kind']}/{issue_date.year}-{m.group(2)}" if m else entry["kind"]
+            if is_routine(item["number"] + " " + item["title"]):
+                continue
+            final.append(item)
+
+    # Open proposals: soonest deadline first (unknown deadlines last). Final: newest issue, then number.
+    proposed.sort(key=lambda r: (r["deadline"] is None, r["deadline"] or date.max, r["title"]))
+    def number_key(r):
+        m = re.match(r"(SOR|SI)/(\d{4})-(\d+)", r["number"])
+        return (m.group(1) != "SOR", int(m.group(2)), int(m.group(3))) if m else (True, 0, 0)
+    final.sort(key=lambda r: (-r["published"].toordinal(), number_key(r)))
+    return {"proposed": proposed, "final": final, "checked": datetime.now(),
+            "p1_issues": len(issues["p1"]), "p2_issues": len(issues["p2"])}
+
+
+def _run_reg_job() -> None:
+    try:
+        data = build_regulations()
+        with _reg_lock:
+            _reg_state.update(status="done", data=data, finished=time.time(), error=None)
+    except Exception as exc:  # any failure must leave the page usable
+        with _reg_lock:
+            _reg_state.update(status="error", finished=time.time(), error=str(exc))
+
+
+# --------------------------------------------------------------------------
+# Federal budget page (data in data/budget.json, sourced figure by figure)
+# --------------------------------------------------------------------------
+BUDGET_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "budget.json")
+BUDGET_COLOURS = ("#2b2d31", "#55606e", "#2f6f73", "#7c8b5a", "#a67c2d", "#7a5a78", "#8a8d93", "#c4c7cc")
+
+
+def load_budget() -> dict | None:
+    try:
+        with open(BUDGET_FILE, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
+
+
+def _billions(value: float) -> str:
+    return f"${abs(value):,.1f}B"
+
+
+def budget_donut(slices: list[dict]) -> dict | None:
+    items = sorted(((s["label"], s["value"]) for s in slices if s["value"] > 0), key=lambda x: -x[1])
+    # The catch-all slice goes last in plain grey so it never borrows a real category's colour.
+    items = [x for x in items if not x[0].lower().startswith("everything else")] + \
+            [x for x in items if x[0].lower().startswith("everything else")]
+    chart = make_donut([(label, value, OTHER_COLOUR if label.lower().startswith("everything else")
+                         else BUDGET_COLOURS[i % len(BUDGET_COLOURS)]) for i, (label, value) in enumerate(items)])
+    if not chart:
+        return None
+    notes = {s["label"]: s.get("note", "") for s in slices}
+    for item in chart["legend"]:
+        item["note"] = notes.get(item["label"], "")
+        item["count"] = _billions(item["count"])
+    chart["total"] = _billions(chart["total"])
+    return chart
+
+
+def budget_view(budget: dict) -> dict:
+    """Everything the budget page shows, computed from the data file."""
+    years = budget["fiscal_years"]
+    focus = budget["focus_year"]
+    fi = years.index(focus)
+    balance_rows = []
+    biggest = max(max(budget["revenues_by_year"]), max(budget["expenses_by_year"]))
+    for i, label in enumerate(years):
+        rev, exp = budget["revenues_by_year"][i], budget["expenses_by_year"][i]
+        bal = budget["balance_by_year"][i]
+        balance_rows.append({
+            "label": label, "projected": i > 0, "focus": label == focus,
+            "rev": _billions(rev), "exp": _billions(exp), "bal": _billions(bal), "deficit": bal < 0,
+            "rev_w": round(rev / biggest * 100, 1), "exp_w": round(exp / biggest * 100, 1),
+        })
+
+    chapters = budget["new_money"]["chapters"]
+    top = max(abs(c["total"]) for c in chapters) or 1
+    chapter_rows = [{**c, "amount": _billions(c["total"]), "saving": c["total"] < 0,
+                     "width": round(abs(c["total"]) / top * 100, 1)} for c in chapters]
+    gross = sum(c["total"] for c in chapters if c["total"] > 0)
+    savings = -sum(c["total"] for c in chapters if c["total"] < 0)
+
+    measures = sorted(budget["major_changes"], key=lambda m: -abs(m["total"]))[:budget.get("major_changes_shown", 10)]
+    mtop = abs(measures[0]["total"]) if measures else 1
+    measure_rows = [{**m, "amount": _billions(m["total"]), "saving": m["total"] < 0,
+                     "width": round(abs(m["total"]) / mtop * 100, 1)} for m in measures]
+
+    return {
+        "name": budget["name"],
+        "tabled": date.fromisoformat(budget["tabled"]),
+        "focus": focus,
+        "spending": budget_donut(budget["spending"]),
+        "revenue": budget_donut(budget["revenue"]),
+        "focus_rev": _billions(budget["revenues_by_year"][fi]),
+        "focus_exp": _billions(budget["expenses_by_year"][fi]),
+        "focus_bal": _billions(budget["balance_by_year"][fi]),
+        "focus_deficit": budget["balance_by_year"][fi] < 0,
+        "balance_rows": balance_rows,
+        "chapter_rows": chapter_rows,
+        "gross": _billions(gross),
+        "savings": _billions(savings),
+        "net": _billions(gross - savings),
+        "new_money_years": budget["new_money"]["years"],
+        "measures": measure_rows,
+        "measures_note": budget.get("major_changes_note", ""),
+        "implementation": budget.get("implementation", []),
+        "later_updates": budget.get("later_updates", []),
+        "pbo": budget.get("pbo"),
+        "sources": budget["sources"],
+    }
+
+
+# --------------------------------------------------------------------------
 # Routes
 # --------------------------------------------------------------------------
 def _fetched_at():
@@ -2155,6 +2660,8 @@ def stats():
     return render_template(
         "stats.html",
         active_tab="stats",
+        stats_section="bills",
+        has_budget=load_budget() is not None,
         clock=parliament_clock(),
         types=type_donut(rows),
         stage_bars=stage_bars(rows),
@@ -2182,6 +2689,47 @@ def stats_parties_api():
     if records:
         ensure_party_job(records)
     snap = party_snapshot()
+    response = jsonify(status=snap["status"], done=snap["done"], total=snap["total"],
+                       ready=snap["data"] is not None, error=snap["error"])
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.route("/stats/budget")
+def budget_page():
+    budget = load_budget()
+    if budget is None:
+        abort(404)
+    return render_template("budget.html", active_tab="stats", stats_section="budget", b=budget_view(budget))
+
+
+@app.route("/regulations")
+def regulations_page():
+    ensure_reg_job()
+    snap = reg_snapshot()
+    data = snap["data"]
+    view = request.args.get("view", "all")
+    if view not in ("all", "proposed", "final"):
+        view = "all"
+    return render_template(
+        "regulations.html",
+        active_tab="regulations",
+        view=view,
+        data=data,
+        reg_status=snap["status"],
+        reg_error=snap["error"],
+        reg_progress=(snap["done"], snap["total"]),
+        updated=datetime.fromtimestamp(snap["finished"]) if data is not None else None,
+        today=date.today(),
+        gazette_home=GAZETTE_HOME,
+    )
+
+
+@app.route("/api/regulations/status")
+def regulations_status_api():
+    """Polled by the Regulations page while the Gazette is being read."""
+    ensure_reg_job()
+    snap = reg_snapshot()
     response = jsonify(status=snap["status"], done=snap["done"], total=snap["total"],
                        ready=snap["data"] is not None, error=snap["error"])
     response.headers["Cache-Control"] = "no-store"

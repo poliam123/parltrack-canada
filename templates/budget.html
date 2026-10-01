@@ -1,0 +1,189 @@
+{% extends "base.html" %}
+{% from "_donut.html" import donut %}
+
+{% block title %}Federal budget | ParlTrack Canada{% endblock %}
+
+{% block intro %}Where federal money comes from and where it goes, from the most recent federal budget. All figures are the government's own, in billions of dollars.{% endblock %}
+
+{% block content %}
+{% include "_stats_nav.html" %}
+<div class="space-y-4">
+
+  {# ---------- Headline ---------- #}
+  <section class="rise rounded-2xl bg-paper p-5 shadow-sm ring-1 ring-ink-200 sm:p-6" aria-labelledby="budget-h">
+    <h2 id="budget-h" class="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.18em] text-maple-700">
+      <span class="h-px w-6 bg-maple-600" aria-hidden="true"></span>Most recent budget
+    </h2>
+    <p class="mt-3 font-serif text-2xl font-semibold leading-tight text-ink-900">{{ b.name }}</p>
+    <p class="text-sm text-ink-500">Presented in the House of Commons on {{ b.tabled.strftime('%B %-d, %Y') }}</p>
+
+    <dl class="mt-5 grid grid-cols-1 gap-3 text-sm sm:grid-cols-3">
+      <div class="rounded-lg bg-ink-50 p-3 ring-1 ring-inset ring-ink-200">
+        <dt class="text-xs font-medium text-ink-500">Money coming in, {{ b.focus }}</dt>
+        <dd class="mt-0.5 font-serif text-2xl font-semibold tabular-nums text-ink-900">{{ b.focus_rev }}</dd>
+      </div>
+      <div class="rounded-lg bg-ink-50 p-3 ring-1 ring-inset ring-ink-200">
+        <dt class="text-xs font-medium text-ink-500">Money going out, {{ b.focus }}</dt>
+        <dd class="mt-0.5 font-serif text-2xl font-semibold tabular-nums text-ink-900">{{ b.focus_exp }}</dd>
+      </div>
+      <div class="rounded-lg bg-maple-50 p-3 ring-1 ring-inset ring-maple-100">
+        <dt class="text-xs font-medium text-maple-700">{{ 'Deficit' if b.focus_deficit else 'Surplus' }}, {{ b.focus }}</dt>
+        <dd class="mt-0.5 font-serif text-2xl font-semibold tabular-nums text-maple-700">{{ b.focus_bal }}</dd>
+      </div>
+    </dl>
+
+    {% for bill in b.implementation %}
+    <p class="mt-4 text-sm text-ink-700">
+      Parliament passed the budget's main changes to the law in
+      <a class="font-semibold text-ink-900 underline decoration-ink-400 underline-offset-2 hover:decoration-ink-800"
+         href="{{ url_for('bill_detail', parl_session=bill.session, number=bill.bill) }}">Bill {{ bill.bill }}, the {{ bill.title }}</a>.
+      {{ bill.status }}{% if bill.statute %} ({{ bill.statute }}){% endif %}.
+    </p>
+    {% endfor %}
+    {% for u in b.later_updates %}
+    <p class="mt-2 text-xs text-ink-500">{{ u.label }}, {{ u.date[:4] }}: {{ u.note }}</p>
+    {% endfor %}
+  </section>
+
+  {# ---------- Where it goes ---------- #}
+  {% if b.spending %}
+  <section class="rise rounded-2xl bg-paper p-5 shadow-sm ring-1 ring-ink-200 sm:p-6" aria-labelledby="spend-h">
+    <h2 id="spend-h" class="font-serif text-lg font-semibold text-ink-900">Where the money goes</h2>
+    <p class="mt-1 mb-5 text-sm text-ink-600">All federal spending planned for {{ b.focus }}, existing programs included. Hover or tap a category for its amount.</p>
+    {{ donut(b.spending, 'Federal spending by category, ' ~ b.focus, 'Total spending', small=true) }}
+  </section>
+  {% endif %}
+
+  {# ---------- Where it comes from ---------- #}
+  {% if b.revenue %}
+  <section class="rise rounded-2xl bg-paper p-5 shadow-sm ring-1 ring-ink-200 sm:p-6" aria-labelledby="rev-h">
+    <h2 id="rev-h" class="font-serif text-lg font-semibold text-ink-900">Where the money comes from</h2>
+    <p class="mt-1 mb-5 text-sm text-ink-600">Federal revenue expected in {{ b.focus }}.</p>
+    {{ donut(b.revenue, 'Federal revenue by source, ' ~ b.focus, 'Total revenue', small=true) }}
+  </section>
+  {% endif %}
+
+  {# ---------- In vs out, by year ---------- #}
+  <section class="rise rounded-2xl bg-paper p-5 shadow-sm ring-1 ring-ink-200 sm:p-6" aria-labelledby="bal-h">
+    <h2 id="bal-h" class="font-serif text-lg font-semibold text-ink-900">Money in, money out, and the gap</h2>
+    <p class="mt-1 mb-4 text-sm text-ink-600">
+      When spending is higher than revenue, the government borrows the difference: that is the deficit.
+      Years after {{ b.balance_rows[0].label }} are the budget's forecasts.
+    </p>
+    <div class="mb-3 flex flex-wrap gap-x-5 gap-y-1 text-xs text-ink-600" aria-hidden="true">
+      <span class="inline-flex items-center gap-1.5"><span class="h-2.5 w-2.5 rounded-sm bg-ink-400"></span>Revenue</span>
+      <span class="inline-flex items-center gap-1.5"><span class="h-2.5 w-2.5 rounded-sm bg-ink-800"></span>Spending</span>
+      <span class="inline-flex items-center gap-1.5"><span class="h-2.5 w-2.5 rounded-sm bg-maple-600"></span>Deficit</span>
+    </div>
+    <ul class="space-y-4">
+      {% for row in b.balance_rows %}
+      <li class="{{ 'rounded-lg bg-ink-50 p-2 -mx-2 ring-1 ring-inset ring-ink-200' if row.focus else '' }}">
+        <div class="flex flex-wrap items-baseline justify-between gap-x-3 text-sm">
+          <span class="font-semibold text-ink-900">{{ row.label }}{% if row.focus %} <span class="text-xs font-medium text-ink-500">(this budget's year)</span>{% endif %}</span>
+          <span class="tabular-nums {{ 'font-semibold text-maple-700' if row.deficit else 'font-semibold text-ink-900' }}">{{ 'Deficit' if row.deficit else 'Surplus' }} {{ row.bal }}</span>
+        </div>
+        <div class="mt-1.5 space-y-1" role="img" aria-label="{{ row.label }}: revenue {{ row.rev }}, spending {{ row.exp }}, {{ 'deficit' if row.deficit else 'surplus' }} {{ row.bal }}">
+          <div class="flex items-center gap-2">
+            <div class="h-2.5 flex-1 overflow-hidden rounded-full bg-ink-100" aria-hidden="true">
+              <div class="grow h-full rounded-full bg-ink-400" style="width: {{ row.rev_w }}%"></div>
+            </div>
+            <span class="w-16 text-right text-xs tabular-nums text-ink-600" aria-hidden="true">{{ row.rev }}</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <div class="relative h-2.5 flex-1 overflow-hidden rounded-full bg-ink-100" aria-hidden="true">
+              <div class="grow absolute inset-y-0 left-0 rounded-full bg-maple-600" style="width: {{ row.exp_w }}%"></div>
+              <div class="grow absolute inset-y-0 left-0 rounded-full bg-ink-800" style="width: {{ row.rev_w if row.deficit else row.exp_w }}%"></div>
+            </div>
+            <span class="w-16 text-right text-xs tabular-nums text-ink-600" aria-hidden="true">{{ row.exp }}</span>
+          </div>
+        </div>
+      </li>
+      {% endfor %}
+    </ul>
+    <p class="mt-3 text-xs text-ink-500">The red end of each spending bar is the part not covered by revenue.</p>
+  </section>
+
+  {# ---------- New money ---------- #}
+  <section class="rise rounded-2xl bg-paper p-5 shadow-sm ring-1 ring-ink-200 sm:p-6" aria-labelledby="new-h">
+    <h2 id="new-h" class="font-serif text-lg font-semibold text-ink-900">New money in this budget</h2>
+    <p class="mt-1 text-sm text-ink-600">
+      Most federal spending continues from year to year. These are the changes this budget announced, over {{ b.new_money_years }}, grouped by the budget's chapters.
+    </p>
+    <dl class="mt-4 grid grid-cols-1 gap-3 text-sm sm:grid-cols-3">
+      <div class="rounded-lg bg-ink-50 p-3 ring-1 ring-inset ring-ink-200">
+        <dt class="text-xs font-medium text-ink-500">New spending and tax cuts</dt>
+        <dd class="mt-0.5 font-serif text-2xl font-semibold tabular-nums text-ink-900">{{ b.gross }}</dd>
+      </div>
+      <div class="rounded-lg bg-ink-50 p-3 ring-1 ring-inset ring-ink-200">
+        <dt class="text-xs font-medium text-ink-500">Savings found</dt>
+        <dd class="mt-0.5 font-serif text-2xl font-semibold tabular-nums text-ink-900">{{ b.savings }}</dd>
+      </div>
+      <div class="rounded-lg bg-ink-50 p-3 ring-1 ring-inset ring-ink-200">
+        <dt class="text-xs font-medium text-ink-500">Net cost of the budget's measures</dt>
+        <dd class="mt-0.5 font-serif text-2xl font-semibold tabular-nums text-ink-900">{{ b.net }}</dd>
+      </div>
+    </dl>
+    <ul class="mt-5 space-y-3">
+      {% for c in b.chapter_rows %}
+      <li>
+        <div class="flex items-baseline justify-between gap-3 text-sm">
+          <span class="text-ink-800"><span class="text-ink-500">Ch. {{ c.chapter }}</span> {{ c.label }}</span>
+          <span class="shrink-0 tabular-nums font-semibold {{ 'text-ink-600' if c.saving else 'text-ink-900' }}">{{ 'saves ' if c.saving }}{{ c.amount }}</span>
+        </div>
+        <div class="mt-1 h-2.5 overflow-hidden rounded-full bg-ink-100" aria-hidden="true">
+          <div class="grow h-full rounded-full {{ 'bg-ink-400' if c.saving else 'bg-ink-800' }}" style="width: {{ c.width }}%"></div>
+        </div>
+      </li>
+      {% endfor %}
+    </ul>
+    <p class="mt-3 text-xs text-ink-500">Figures are rounded, so totals may differ slightly from the budget's own.</p>
+  </section>
+
+  {# ---------- Major changes ---------- #}
+  {% if b.measures %}
+  <section class="rise rounded-2xl bg-paper p-5 shadow-sm ring-1 ring-ink-200 sm:p-6" aria-labelledby="major-h">
+    <h2 id="major-h" class="font-serif text-lg font-semibold text-ink-900">Biggest changes, by cost</h2>
+    <p class="mt-1 mb-4 text-sm text-ink-600">The {{ b.measures|length }} largest changes in the budget, measured by how much they cost or save over {{ b.new_money_years }}.</p>
+    <ol class="space-y-4">
+      {% for m in b.measures %}
+      <li class="grid grid-cols-[1.5rem_1fr] gap-x-2">
+        <span class="pt-0.5 text-sm font-semibold tabular-nums text-ink-500">{{ loop.index }}</span>
+        <div class="min-w-0">
+          <div class="flex flex-wrap items-baseline justify-between gap-x-3 text-sm">
+            <a href="{{ m.url }}" target="_blank" rel="noopener" class="font-semibold text-ink-900 underline decoration-ink-200 underline-offset-2 hover:decoration-ink-800">{{ m.label }}</a>
+            <span class="tabular-nums font-semibold {{ 'text-ink-600' if m.saving else 'text-ink-900' }}">{{ 'saves ' if m.saving }}{{ m.amount }}</span>
+          </div>
+          <p class="text-xs text-ink-500">{{ m.kind }} · Chapter {{ m.chapter }}{% if m.years %} · {{ m.years }}{% endif %}</p>
+          <div class="mt-1 h-2 overflow-hidden rounded-full bg-ink-100" aria-hidden="true">
+            <div class="grow h-full rounded-full {{ 'bg-ink-400' if m.saving else 'bg-maple-600' }}" style="width: {{ m.width }}%"></div>
+          </div>
+        </div>
+      </li>
+      {% endfor %}
+    </ol>
+    {% if b.measures_note %}<p class="mt-4 text-xs text-ink-500">{{ b.measures_note }}</p>{% endif %}
+  </section>
+  {% endif %}
+
+  {# ---------- Independent analysis ---------- #}
+  {% if b.pbo %}
+  <section class="rise rounded-2xl bg-paper p-5 shadow-sm ring-1 ring-ink-200 sm:p-6" aria-labelledby="pbo-h">
+    <h2 id="pbo-h" class="font-serif text-lg font-semibold text-ink-900">An independent view</h2>
+    <p class="mt-1 text-sm text-ink-600">{{ b.pbo.note }}</p>
+    <a href="{{ b.pbo.url }}" target="_blank" rel="noopener"
+       class="mt-3 inline-flex items-center gap-1.5 text-sm font-semibold text-maple-700 underline underline-offset-2">{{ b.pbo.label }} &rarr;</a>
+  </section>
+  {% endif %}
+
+  {# ---------- Sources ---------- #}
+  <section class="rise rounded-2xl bg-paper p-5 shadow-sm ring-1 ring-ink-200 sm:p-6" aria-labelledby="src-h">
+    <h2 id="src-h" class="font-serif text-lg font-semibold text-ink-900">Sources</h2>
+    <ul class="mt-2 space-y-1.5 text-sm">
+      {% for s in b.sources %}
+      <li><a href="{{ s.url }}" target="_blank" rel="noopener" class="text-ink-700 underline decoration-ink-400 underline-offset-2 hover:text-ink-900">{{ s.label }}</a></li>
+      {% endfor %}
+    </ul>
+  </section>
+
+</div>
+{% endblock %}
