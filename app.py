@@ -1684,6 +1684,9 @@ COMMITTEE_NAMES = {
     "OGGO": "Government Operations and Estimates", "PACP": "Public Accounts", "PROC": "Procedure and House Affairs",
     "RNNR": "Natural Resources", "SECU": "Public Safety and National Security",
     "TRAN": "Transport, Infrastructure and Communities", "CIIT": "International Trade", "LIAI": "Liaison",
+    "SRSR": "Science and Research", "AMAD": "Medical Assistance in Dying",
+    "BCAN": "Exercise of Powers Under the Building Canada Act", "BILI": "Library of Parliament",
+    "REGS": "Scrutiny of Regulations",
 }
 COMMITTEE_LINK_RE = re.compile(r"/Committees/en/([A-Z]{3,6})(?=[\"'?#/]|$)")
 COMMITTEE_TTL = 12 * 3600
@@ -1724,6 +1727,7 @@ def get_committee_list() -> list[dict]:
     if len(parsed) < 5:  # a real list has dozens; fewer means the page changed
         parsed = {a: "" for a in COMMITTEE_NAMES}
     items = [{"acr": a, "name": COMMITTEE_NAMES.get(a) or n} for a, n in parsed.items()]
+    items = [i for i in items if i["name"]]  # codes with no name are subcommittees (e.g. SFIN): leave them out
     with _committee_lock:
         _committee_list_cache.update(items=items, expires=now + COMMITTEE_TTL)
     return items
