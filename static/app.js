@@ -27,16 +27,6 @@
     });
   }
 
-  /* ---- Header shrinks a little once you scroll ---- */
-  var bar = $('#top-bar');
-  if (bar) {
-    var onScroll = function () {
-      if (window.scrollY > 24) { bar.setAttribute('data-scrolled', ''); } else { bar.removeAttribute('data-scrolled'); }
-    };
-    window.addEventListener('scroll', onScroll, { passive: true });
-    onScroll();
-  }
-
   /* ---- Loading queues: a few requests at a time so Parliament's site is never hammered ---- */
   function queue(slots, load, width) {
     var next = 0;

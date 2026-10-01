@@ -17,12 +17,6 @@ html.dark {
 html { -webkit-text-size-adjust: 100%; scroll-behavior: smooth; }
 body { font-feature-settings: "cv11", "ss01"; -webkit-font-smoothing: antialiased; }
 
-/* Header shrinks a little once you scroll */
-#top-bar #brand-row { transition: padding .2s ease; }
-#top-bar[data-scrolled] #brand-row { padding-top: .35rem; padding-bottom: .35rem; }
-#flag { transition: width .2s ease, height .2s ease; }
-#top-bar[data-scrolled] #flag { width: 2.5rem; height: 1.25rem; }
-
 /* Links and buttons that explain a term */
 .term { border-bottom: 1px dotted currentColor; cursor: help; }
 .term:hover { color: rgb(var(--maple-700)); }
