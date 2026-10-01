@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en" class="bg-ink-100">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>{% block title %}ParlTrack Canada{% endblock %}</title>
+  <meta name="description" content="Track the bills moving through Canada's Parliament.">
+
+  <!-- PWA -->
+  <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
+  <meta name="theme-color" content="#DC2626">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="ParlTrack">
+  <link rel="icon" type="image/png" sizes="192x192" href="{{ url_for('static', filename='icons/icon-192.png') }}">
+  <link rel="apple-touch-icon" href="{{ url_for('static', filename='icons/icon-180.png') }}">
+
+  <!-- Tailwind Play CDN: fine for development; compile Tailwind for production. -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            maple: { 50: '#fdf0ee', 100: '#fadbd7', 600: '#d52b1e', 700: '#b3231a' },
+            ink: {
+              50: '#f6f6f7', 100: '#ececee', 200: '#d6d7da', 400: '#9a9ea6',
+              500: '#74777f', 600: '#4b4f56', 700: '#3a3d42', 800: '#2b2d31', 900: '#1f2023'
+            }
+          }
+        }
+      }
+    }
+  </script>
+</head>
+
+<body class="min-h-screen bg-ink-100 text-ink-900 antialiased font-sans">
+
+  <header class="bg-ink-800 text-white pt-[env(safe-area-inset-top)] border-b-4 border-maple-600">
+    <div class="mx-auto max-w-2xl px-4 py-5 sm:py-6">
+      <div class="flex items-center gap-3">
+        <!-- Flag-style mark: red, white, red -->
+        <div class="flex h-8 w-14 shrink-0 overflow-hidden rounded-sm" aria-hidden="true">
+          <div class="w-1/4 bg-maple-600"></div>
+          <div class="w-1/2 bg-white"></div>
+          <div class="w-1/4 bg-maple-600"></div>
+        </div>
+        <h1 class="text-2xl font-bold tracking-tight sm:text-3xl">ParlTrack Canada</h1>
+      </div>
+
+      <nav aria-label="Sections" class="mt-4 grid grid-cols-2 gap-2">
+        <a href="{{ url_for('index') }}"
+           {% if active_tab == 'active' %}aria-current="page"{% endif %}
+           class="rounded-md px-3 py-2.5 text-center text-sm font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white
+                  {{ 'bg-white text-ink-900' if active_tab == 'active' else 'bg-ink-700 text-white hover:bg-ink-600' }}">
+          Active bills
+        </a>
+        <a href="{{ url_for('passed') }}"
+           {% if active_tab == 'passed' %}aria-current="page"{% endif %}
+           class="rounded-md px-3 py-2.5 text-center text-sm font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white
+                  {{ 'bg-white text-ink-900' if active_tab == 'passed' else 'bg-ink-700 text-white hover:bg-ink-600' }}">
+          Passed bills
+        </a>
+      </nav>
+
+      <p class="mt-4 text-sm text-ink-200 sm:text-base">
+        {% block intro %}{% endblock %}
+      </p>
+    </div>
+  </header>
+
+  <main class="mx-auto max-w-2xl px-4 pb-[calc(2rem+env(safe-area-inset-bottom))] pt-5">
+
+    {% if warning %}
+    <div role="alert" class="mb-4 rounded-lg border-l-4 border-maple-600 bg-white p-4 text-sm text-ink-800 shadow-sm">
+      {{ warning }}
+    </div>
+    {% endif %}
+
+    {% block content %}{% endblock %}
+
+    <footer class="mt-8 text-xs leading-relaxed text-ink-500">
+      {% if fetched_at %}<p>Fetched {{ fetched_at.strftime('%Y-%m-%d %H:%M') }}{% if total %}, {{ total }} bills in the feed{% endif %}.</p>{% endif %}
+      <p class="mt-1">
+        Data from <a class="underline decoration-maple-600 underline-offset-2 hover:text-ink-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink-800"
+                     href="https://www.parl.ca/legisinfo/en/bills">LEGISinfo</a>, Parliament of Canada.
+        Proposed changes are the opening summary printed with each bill. The other lines are built from the bill's listed title and status.
+      </p>
+    </footer>
+  </main>
+
+  <script>
+    // Loads each bill's official summary after the page appears, three at a time,
+    // so a slow response from Parliament's site never holds up the bill list.
+    (function () {
+      var slots = Array.prototype.slice.call(document.querySelectorAll('[data-summary-url]'));
+      var next = 0;
+
+      function load(slot) {
+        var target = slot.querySelector('[data-summary-text]');
+        return fetch(slot.getAttribute('data-summary-url'), { headers: { 'Accept': 'application/json' } })
+          .then(function (res) { return res.json(); })
+          .then(function (data) {
+            target.textContent = data.summary ||
+              'No official summary was found for this bill. Read the bill text for details.';
+          })
+          .catch(function () {
+            target.textContent = 'The summary could not be loaded. Reload the page to try again.';
+          })
+          .then(function () { slot.removeAttribute('aria-busy'); });
+      }
+
+      function worker() {
+        if (next >= slots.length) { return; }
+        load(slots[next++]).then(worker);
+      }
+
+      for (var i = 0; i < 3; i++) { worker(); }
+    })();
+  </script>
+</body>
+</html>
