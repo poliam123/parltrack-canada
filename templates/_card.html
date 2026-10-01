@@ -55,12 +55,26 @@
          data-summary-url="{{ url_for('summary', parl_session=bill.session, number=bill.number|upper) }}"
          aria-busy="true"
          {% endif %}>
-      <h4 class="text-sm font-semibold text-ink-800">Proposed changes</h4>
+      <h4 class="text-sm font-semibold text-ink-800">
+        {% if bill.number_ok %}
+        <a href="{{ url_for('bill_detail', parl_session=bill.session, number=bill.number|upper) }}"
+           class="inline-flex items-center gap-1 text-ink-800 hover:text-maple-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink-800">
+          Proposed changes
+          <svg class="h-4 w-4 text-maple-600" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M7.2 4.8a1 1 0 0 1 1.4 0l4.5 4.5a1 1 0 0 1 0 1.4l-4.5 4.5a1 1 0 1 1-1.4-1.4L11 10 7.2 6.2a1 1 0 0 1 0-1.4z" clip-rule="evenodd"/></svg>
+        </a>
+        {% else %}Proposed changes{% endif %}
+      </h4>
       <p class="mt-1 text-sm leading-relaxed text-ink-800" data-summary-text aria-live="polite">
         {% if bill.number_ok %}Loading summary&hellip;{% else %}No official summary is available for this bill number. Read the bill text for details.{% endif %}
       </p>
-      <a class="mt-2 inline-block text-xs text-ink-600 underline decoration-maple-600 underline-offset-2 hover:text-ink-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink-800"
-         href="{{ bill.doc_url }}" target="_blank" rel="noopener">Read the bill text</a>
+      <p class="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs">
+        {% if bill.number_ok %}
+        <a class="font-semibold text-maple-700 underline decoration-maple-600 underline-offset-2 hover:text-maple-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink-800"
+           href="{{ url_for('bill_detail', parl_session=bill.session, number=bill.number|upper) }}">Read the full summary</a>
+        {% endif %}
+        <a class="text-ink-600 underline decoration-maple-600 underline-offset-2 hover:text-ink-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink-800"
+           href="{{ bill.doc_url }}" target="_blank" rel="noopener">Read the bill text</a>
+      </p>
     </div>
 
     {# Lines 2 to 5 of 5 #}

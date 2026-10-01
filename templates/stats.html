@@ -1,0 +1,225 @@
+{% extends "base.html" %}
+
+{% macro donut(chart, label, centre_label) %}
+<div class="flex flex-col items-center gap-5 sm:flex-row sm:items-center">
+  <div class="relative h-40 w-40 shrink-0 rounded-full" style="background: {{ chart.gradient }}"
+       role="img" aria-label="{{ label }}: {% for item in chart.legend %}{{ item.label }} {{ item.count }}{% if not loop.last %}, {% endif %}{% endfor %}">
+    <div class="absolute inset-[2.1rem] flex flex-col items-center justify-center rounded-full bg-white">
+      <span class="text-2xl font-bold leading-none text-ink-900">{{ chart.total }}</span>
+      <span class="mt-1 text-[0.65rem] font-medium uppercase tracking-wide text-ink-500">{{ centre_label }}</span>
+    </div>
+  </div>
+  <ul class="w-full space-y-2 text-sm">
+    {% for item in chart.legend %}
+    <li class="flex items-center gap-2.5">
+      <span class="h-3 w-3 shrink-0 rounded-sm ring-1 ring-inset ring-black/10" style="background: {{ item.colour }}" aria-hidden="true"></span>
+      <span class="flex-1 text-ink-800">{{ item.label }}</span>
+      <span class="tabular-nums font-semibold text-ink-900">{{ item.count }}</span>
+      <span class="w-10 text-right tabular-nums text-ink-500">{{ item.pct }}%</span>
+    </li>
+    {% endfor %}
+  </ul>
+</div>
+{% endmacro %}
+
+{% block title %}Statistics | ParlTrack Canada{% endblock %}
+
+{% block intro %}How the {{ clock.parliament }} Parliament's bills break down, and how long it has been sitting.{% endblock %}
+
+{% block content %}
+<div class="space-y-4">
+
+  {# ---------- Parliament clock ---------- #}
+  <section class="overflow-hidden rounded-xl bg-white shadow-sm ring-1 ring-ink-200" aria-labelledby="clock-h">
+    <div class="p-5">
+      <h2 id="clock-h" class="flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-maple-700">
+        <span class="h-px w-6 bg-maple-600" aria-hidden="true"></span>This Parliament
+      </h2>
+      <p class="mt-3 text-sm text-ink-600">
+        The {{ clock.parliament }} Parliament{% if clock.session %}, {{ clock.session }} session,{% endif %} first sat on
+        <span class="font-medium text-ink-800">{{ clock.opened.strftime('%B %-d, %Y') }}</span>.
+      </p>
+      <p class="mt-2 text-2xl font-bold leading-tight text-ink-900">{{ clock.elapsed_text }}</p>
+      <p class="text-sm text-ink-500">{{ '{:,}'.format(clock.elapsed_days) }} days since it opened</p>
+
+      <div class="mt-5" role="img"
+           aria-label="{{ clock.pct_label }} percent of the way from the opening of Parliament to the scheduled election">
+        <div class="h-3 overflow-hidden rounded-full bg-ink-200" aria-hidden="true">
+          <div class="h-full rounded-full bg-maple-600" style="width: {{ clock.pct }}%"></div>
+        </div>
+        <div class="mt-1.5 flex justify-between text-xs text-ink-500" aria-hidden="true">
+          <span>{{ clock.opened.strftime('%b %Y') }}</span>
+          <span class="font-semibold text-ink-700">{{ clock.pct_label }}% of the way</span>
+          <span>{{ clock.election.strftime('%b %Y') }}</span>
+        </div>
+      </div>
+
+      <dl class="mt-5 grid grid-cols-2 gap-3 text-sm">
+        <div class="rounded-lg bg-ink-50 p-3 ring-1 ring-inset ring-ink-200">
+          <dt class="text-xs font-medium text-ink-500">Scheduled election</dt>
+          <dd class="mt-0.5 font-semibold text-ink-900">{{ clock.election.strftime('%B %-d, %Y') }}</dd>
+        </div>
+        <div class="rounded-lg bg-ink-50 p-3 ring-1 ring-inset ring-ink-200">
+          <dt class="text-xs font-medium text-ink-500">Time remaining</dt>
+          <dd class="mt-0.5 font-semibold text-ink-900">
+            {% if clock.overdue %}Date has passed{% else %}{{ '{:,}'.format(clock.remaining_days) }} days{% endif %}
+          </dd>
+        </div>
+      </dl>
+      {% if clock.remaining_text %}
+      <p class="mt-2 text-xs text-ink-500">That is {{ clock.remaining_text }} from today.</p>
+      {% endif %}
+
+      <p class="mt-4 text-xs leading-relaxed text-ink-500">
+        {% if clock.overdue %}
+        The scheduled election date in this app is out of date and needs updating.
+        {% else %}
+        Canada's fixed-date law sets the next election for the third Monday in October of the fourth year after the last one.
+        It is a target, not a promise: an election can come sooner if the House loses a confidence vote or the Prime Minister asks
+        the Governor General to dissolve Parliament. No Parliament can run longer than five years.
+        {% endif %}
+      </p>
+    </div>
+  </section>
+
+  {# ---------- Bill types ---------- #}
+  <section class="rounded-xl bg-white p-5 shadow-sm ring-1 ring-ink-200" aria-labelledby="types-h">
+    <h2 id="types-h" class="text-base font-semibold text-ink-900">What kind of bills are these?</h2>
+    <p class="mt-1 mb-4 text-sm text-ink-600">
+      Every bill in this Parliament by type. Government bills come from the cabinet.
+      Private members' bills come from individual MPs who aren't in cabinet.
+    </p>
+    {% if types %}
+    {{ donut(types, 'Bills by type', 'bills') }}
+    {% else %}
+    <p class="text-sm text-ink-600">No bill data is available right now.</p>
+    {% endif %}
+  </section>
+
+  {# ---------- Party of origin ---------- #}
+  <section class="rounded-xl bg-white p-5 shadow-sm ring-1 ring-ink-200" aria-labelledby="party-h">
+    <h2 id="party-h" class="text-base font-semibold text-ink-900">Which parties do the bills come from?</h2>
+    <p class="mt-1 mb-4 text-sm text-ink-600">
+      House of Commons bills, by the party of the MP who introduced them.
+    </p>
+
+    {% if party %}
+      {% if party.all %}
+      <h3 class="mb-3 text-sm font-semibold text-ink-800">All House bills</h3>
+      {{ donut(party.all, 'House bills by sponsor party', 'bills') }}
+      {% endif %}
+
+      {% if party.pmb %}
+      <h3 class="mb-3 mt-7 border-t border-ink-200 pt-5 text-sm font-semibold text-ink-800">Private members' bills only</h3>
+      {{ donut(party.pmb, "Private members' bills by sponsor party", 'bills') }}
+      {% endif %}
+
+      <p class="mt-5 text-xs leading-relaxed text-ink-500">
+        Party is the sponsor's <em>current</em> party, so an MP who has switched parties is counted with their new one.
+        {% if party.unknown %}"Unknown" means the sponsor is no longer in the House or Parliament's site did not name them.{% endif %}
+        {% if not party.members_found %}The list of sitting MPs could not be read, so parties came from each sponsor's recorded speeches and may be incomplete.{% endif %}
+        {{ party.senate_count }} bill{{ '' if party.senate_count == 1 else 's' }} started in the Senate and aren't counted here.
+        Updated {{ party.updated.strftime('%Y-%m-%d %H:%M') }}.
+      </p>
+    {% elif party_status == 'error' %}
+      <div class="rounded-lg bg-ink-50 p-4 text-sm text-ink-800 ring-1 ring-inset ring-ink-200" role="alert">
+        <p class="font-semibold">The party chart couldn't be built just now.</p>
+        <p class="mt-1 text-ink-600">Parliament's site didn't answer in time. Reload this page in a few minutes to try again.</p>
+      </div>
+    {% else %}
+      <div class="rounded-lg bg-ink-50 p-4 ring-1 ring-inset ring-ink-200" id="party-pending" aria-live="polite">
+        <p class="text-sm font-semibold text-ink-800">Building this chart&hellip;</p>
+        <p class="mt-1 text-sm text-ink-600">
+          Each bill's sponsor has to be looked up on Parliament's site. This takes about a minute the first time,
+          then the chart is saved for 12 hours.
+        </p>
+        <div class="mt-3 h-2 overflow-hidden rounded-full bg-ink-200" aria-hidden="true">
+          <div id="party-bar" class="h-full rounded-full bg-maple-600 transition-all" style="width: 4%"></div>
+        </div>
+        <p class="mt-1.5 text-xs text-ink-500" id="party-count">Starting&hellip;</p>
+      </div>
+    {% endif %}
+  </section>
+
+  {# ---------- Where bills stand ---------- #}
+  {% if stage_bars %}
+  <section class="rounded-xl bg-white p-5 shadow-sm ring-1 ring-ink-200" aria-labelledby="stand-h">
+    <h2 id="stand-h" class="text-base font-semibold text-ink-900">Where the bills stand</h2>
+    <p class="mt-1 mb-4 text-sm text-ink-600">{{ bill_total }} bills so far, grouped by what has happened to them.</p>
+    <ul class="space-y-3">
+      {% for bar in stage_bars %}
+      <li>
+        <div class="flex items-baseline justify-between gap-3 text-sm">
+          <span class="text-ink-800">{{ bar.label }}</span>
+          <span class="tabular-nums font-semibold text-ink-900">{{ bar.count }}</span>
+        </div>
+        <div class="mt-1 h-2.5 overflow-hidden rounded-full bg-ink-100" aria-hidden="true">
+          <div class="h-full rounded-full {{ 'bg-maple-600' if bar.label == 'Became law' else 'bg-ink-600' }}" style="width: {{ bar.width }}%"></div>
+        </div>
+      </li>
+      {% endfor %}
+    </ul>
+  </section>
+  {% endif %}
+
+  {# ---------- Passage rate ---------- #}
+  {% if outcomes %}
+  <section class="rounded-xl bg-white p-5 shadow-sm ring-1 ring-ink-200" aria-labelledby="rate-h">
+    <h2 id="rate-h" class="text-base font-semibold text-ink-900">How many make it into law?</h2>
+    <p class="mt-1 mb-3 text-sm text-ink-600">Outcome by bill type. Many bills are still moving, so these rates will rise.</p>
+    <div class="overflow-x-auto">
+      <table class="w-full min-w-[20rem] text-left text-sm">
+        <thead>
+          <tr class="border-b border-ink-200 text-xs text-ink-500">
+            <th scope="col" class="py-2 pr-2 font-medium">Type</th>
+            <th scope="col" class="px-2 py-2 text-right font-medium">Total</th>
+            <th scope="col" class="px-2 py-2 text-right font-medium">Law</th>
+            <th scope="col" class="px-2 py-2 text-right font-medium">Ended</th>
+            <th scope="col" class="py-2 pl-2 text-right font-medium">Still alive</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in outcomes %}
+          <tr class="border-b border-ink-100 last:border-0">
+            <th scope="row" class="py-2.5 pr-2 font-medium text-ink-800">{{ row.label }}</th>
+            <td class="px-2 py-2.5 text-right tabular-nums">{{ row.total }}</td>
+            <td class="px-2 py-2.5 text-right tabular-nums font-semibold text-ink-900">{{ row.law }} <span class="font-normal text-ink-500">({{ row.law_pct }}%)</span></td>
+            <td class="px-2 py-2.5 text-right tabular-nums">{{ row.ended }}</td>
+            <td class="py-2.5 pl-2 text-right tabular-nums">{{ row.alive }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+  {% endif %}
+
+</div>
+
+{% if not party and party_status != 'error' %}
+<script>
+  // Checks on the party chart every few seconds and reloads once it is ready.
+  (function () {
+    var bar = document.getElementById('party-bar');
+    var count = document.getElementById('party-count');
+    var tries = 0;
+    function poll() {
+      tries++;
+      fetch('{{ url_for("stats_parties_api") }}', { headers: { 'Accept': 'application/json' } })
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          if (d.ready && d.status !== 'running') { location.reload(); return; }
+          if (d.status === 'error') { location.reload(); return; }
+          if (d.total) {
+            bar.style.width = Math.max(4, Math.round(d.done / d.total * 100)) + '%';
+            count.textContent = d.done + ' of ' + d.total + ' bills checked';
+          }
+          if (tries < 100) { setTimeout(poll, 3000); }
+        })
+        .catch(function () { if (tries < 100) { setTimeout(poll, 5000); } });
+    }
+    setTimeout(poll, 1500);
+  })();
+</script>
+{% endif %}
+{% endblock %}

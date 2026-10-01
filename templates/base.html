@@ -49,18 +49,24 @@
         <h1 class="text-2xl font-bold tracking-tight sm:text-3xl">ParlTrack Canada</h1>
       </div>
 
-      <nav aria-label="Sections" class="mt-4 grid grid-cols-2 gap-2">
+      <nav aria-label="Sections" class="mt-4 grid grid-cols-3 gap-2">
         <a href="{{ url_for('index') }}"
            {% if active_tab == 'active' %}aria-current="page"{% endif %}
-           class="rounded-md px-3 py-2.5 text-center text-sm font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white
+           class="rounded-md px-2 py-2.5 text-center text-sm font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white
                   {{ 'bg-white text-ink-900' if active_tab == 'active' else 'bg-ink-700 text-white hover:bg-ink-600' }}">
           Active bills
         </a>
         <a href="{{ url_for('passed') }}"
            {% if active_tab == 'passed' %}aria-current="page"{% endif %}
-           class="rounded-md px-3 py-2.5 text-center text-sm font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white
+           class="rounded-md px-2 py-2.5 text-center text-sm font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white
                   {{ 'bg-white text-ink-900' if active_tab == 'passed' else 'bg-ink-700 text-white hover:bg-ink-600' }}">
           Passed bills
+        </a>
+        <a href="{{ url_for('stats') }}"
+           {% if active_tab == 'stats' %}aria-current="page"{% endif %}
+           class="rounded-md px-2 py-2.5 text-center text-sm font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white
+                  {{ 'bg-white text-ink-900' if active_tab == 'stats' else 'bg-ink-700 text-white hover:bg-ink-600' }}">
+          Statistics
         </a>
       </nav>
 

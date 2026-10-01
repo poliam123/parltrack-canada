@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+
+{% block title %}Proposed changes, {{ number }} | ParlTrack Canada{% endblock %}
+
+{% block intro %}The main changes {{ number }} would make, in plain reading order.{% endblock %}
+
+{% block content %}
+<a id="back-link" href="{{ url_for('index') }}"
+   class="inline-flex items-center gap-1 text-sm font-medium text-ink-600 hover:text-ink-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink-800">
+  <svg class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M12.8 4.8a1 1 0 0 1 0 1.4L9 10l3.8 3.8a1 1 0 1 1-1.4 1.4l-4.5-4.5a1 1 0 0 1 0-1.4l4.5-4.5a1 1 0 0 1 1.4 0z" clip-rule="evenodd"/></svg>
+  Back to bills
+</a>
+
+<article class="mt-3 overflow-hidden rounded-xl bg-white shadow-sm ring-1 ring-ink-200">
+
+  <header class="border-b border-ink-200 p-5 sm:p-6">
+    <div class="flex flex-wrap items-center gap-2">
+      <span class="inline-flex items-center rounded-md bg-maple-600 px-2.5 py-1 text-sm font-bold text-white">{{ number }}</span>
+      {% if bill and bill.status %}
+      <span class="inline-flex max-w-full items-center rounded-md bg-ink-800 px-2.5 py-1 text-xs font-medium leading-snug text-white">{{ bill.status }}</span>
+      {% endif %}
+      {% if doc_type %}
+      <span class="inline-flex items-center rounded-md bg-ink-100 px-2.5 py-1 text-xs font-medium text-ink-700 ring-1 ring-inset ring-ink-200">{{ doc_type }}</span>
+      {% endif %}
+    </div>
+
+    <h2 class="mt-3 text-lg font-semibold leading-snug text-ink-900">{{ title or short_title or 'Title not available' }}</h2>
+    {% if short_title and title %}<p class="mt-1 text-sm text-ink-600">Short title: {{ short_title }}</p>{% endif %}
+
+    {% if sponsor %}
+    <p class="mt-3 text-sm text-ink-600">
+      <span class="font-medium text-ink-800">Sponsor:</span>
+      {{ sponsor.name }}{% if sponsor.title %}, {{ sponsor.title }}{% endif %}{% if sponsor.riding %} ({{ sponsor.riding }}){% endif %}
+    </p>
+    {% endif %}
+  </header>
+
+  <div class="px-5 py-6 sm:px-8 sm:py-8">
+    <p class="flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-maple-700">
+      <span class="h-px w-6 bg-maple-600" aria-hidden="true"></span>Proposed changes
+    </p>
+
+    {% if blocks %}
+    <div class="mt-4">
+      {% for para in blocks %}
+      <div class="{{ '' if loop.first else 'mt-6' }}">
+        {% if para.text %}
+        <p class="{{ 'text-lg font-medium leading-8 text-ink-900' if loop.first else 'text-[1.0625rem] leading-8 text-ink-800' }}">
+          {% if para.lead %}<strong class="font-bold text-ink-900">{{ para.lead }}</strong> {% endif %}{{ para.text }}
+        </p>
+        {% endif %}
+        {% if para.points %}
+        <ul class="{{ 'mt-3' if para.text else '' }} space-y-2.5">
+          {% for point in para.points %}
+          <li class="flex gap-3 text-[1.0625rem] leading-7 text-ink-800">
+            <span class="mt-[0.7rem] h-1.5 w-1.5 shrink-0 bg-maple-600" aria-hidden="true"></span>
+            <span>{{ point }}</span>
+          </li>
+          {% endfor %}
+        </ul>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+
+    {% if truncated %}
+    <p class="mt-6 rounded-md bg-ink-50 px-3 py-2 text-sm text-ink-600 ring-1 ring-inset ring-ink-200">
+      This is shortened to the first five points. The bill itself covers more.
+    </p>
+    {% endif %}
+
+    {% else %}
+    <div class="mt-4 rounded-lg bg-ink-50 p-4 text-ink-800 ring-1 ring-inset ring-ink-200">
+      <p class="font-semibold">No summary is available yet.</p>
+      <p class="mt-1 text-sm text-ink-600">
+        Parliament hasn't published one for this bill, or its site did not answer.
+        Try again in a few minutes, or read the bill text.
+      </p>
+    </div>
+    {% endif %}
+  </div>
+
+  <footer class="border-t border-ink-200 bg-ink-50 px-5 py-4 sm:px-8">
+    {% if source %}<p class="text-xs text-ink-500">{{ source }}</p>{% endif %}
+    <p class="mt-2 flex flex-wrap gap-x-5 gap-y-2 text-sm">
+      <a class="font-semibold text-maple-700 underline decoration-maple-600 underline-offset-2 hover:text-maple-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink-800"
+         href="{{ doc_url }}" target="_blank" rel="noopener">Read the full bill text</a>
+      <a class="text-ink-700 underline decoration-ink-400 underline-offset-2 hover:text-ink-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink-800"
+         href="{{ legis_url }}" target="_blank" rel="noopener">View on LEGISinfo</a>
+    </p>
+  </footer>
+</article>
+
+<script>
+  // "Back" returns to whichever list you came from (active or passed), when possible.
+  (function () {
+    var link = document.getElementById('back-link');
+    if (document.referrer && document.referrer.indexOf(location.host) !== -1 && history.length > 1) {
+      link.addEventListener('click', function (e) { e.preventDefault(); history.back(); });
+    }
+  })();
+</script>
+{% endblock %}
