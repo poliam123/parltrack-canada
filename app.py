@@ -4,6 +4,8 @@ Pages
   /                              the 20 most recently active bills still moving
   /passed                        the 10 most recent bills with royal assent
   /bill/<session>/<number>       "Proposed changes": a readable 1-5 paragraph summary
+  /following                     the bills you've starred (stored in your browser)
+  /api/bill/<session>/<number>   JSON: sponsor, party, votes for one bill
   /stats                         charts: bill types, sponsors' parties, Parliament clock
   /summary/<session>/<number>    JSON: official 3-sentence summary of a bill
   /api/stats/parties             JSON: progress of the party-chart job
@@ -29,7 +31,7 @@ from datetime import date, datetime, timezone
 from html.parser import HTMLParser
 
 import requests
-from flask import Flask, abort, jsonify, render_template
+from flask import Flask, abort, jsonify, render_template, request, url_for
 
 LEGISINFO_URL = "https://www.parl.ca/legisinfo/en/bills/json"
 DOCUMENT_URL = "https://www.parl.ca/DocumentViewer/en/{session}/bill/{number}/{stage}"
@@ -258,6 +260,55 @@ def build_breakdown(number: str, short: str, long: str, origin: str, current: st
     ]
 
 
+def record_dates(record: dict) -> dict[str, datetime]:
+    """Every real timestamp on a feed record, by field name."""
+    out = {}
+    for key, value in record.items():
+        if "DateTime" in key and isinstance(value, str):
+            parsed = parse_date(value)
+            if parsed:
+                out[key] = parsed
+    return out
+
+
+AMEND_SPLIT = re.compile(r"\s*\(|,? and (?:to |make |other |consequential)|,? to |;")
+AMEND_PARTS = re.compile(r",(?!\s*\d)\s*(?:and\s+)?(?:the\s+)?| and (?:the )?")
+
+TOPICS = (
+    ("Justice and policing", ("criminal", "justice", "police", "sentenc", "bail", "firearm", "offence", "victim", "court", "corrections", "judges")),
+    ("Immigration and citizenship", ("immigration", "citizenship", "refugee", "border", "asylum")),
+    ("Health and safety", ("health", "drug", "medical", "pharma", "cannabis", "tobacco", "food and drugs", "mental")),
+    ("Housing and cost of living", ("housing", "rent", "mortgage", "home ", "homes", "grocery", "price")),
+    ("Money and taxes", ("tax", "budget", "income", "financ", "bank", "economic statement", "fiscal", "payment", "pension", "insurance", "affordab")),
+    ("Environment and energy", ("environment", "climate", "energy", "emission", "pipeline", "carbon", "oil", "fisher", "wildlife", "water")),
+    ("Elections and democracy", ("election", "elector", "parliament", "senate", "ethics", "lobby", "representation", "constitution")),
+    ("Defence and security", ("defence", "security", "military", "armed forces", "foreign", "sanction", "intelligence", "terror")),
+    ("Indigenous affairs", ("indigenous", "first nations", "inuit", "m\u00e9tis", "metis", "reconciliation")),
+    ("Work and business", ("labour", "employment", "worker", "business", "competition", "trade", "union", "wage")),
+    ("Transport and infrastructure", ("transport", "rail", "airline", "port", "marine", "infrastructure", "highway", "shipping")),
+    ("Technology and media", ("online", "internet", "digital", "privacy", "data", "broadcast", "artificial", "cyber", "copyright")),
+    ("Agriculture and food", ("agricultur", "farm", "supply management", "dairy", "grain")),
+)
+
+
+def topic_for(text: str) -> str:
+    low = text.lower()
+    for label, words in TOPICS:
+        if any(w in low for w in words):
+            return label
+    return "Other"
+
+
+def amended_acts(title: str) -> list[str]:
+    """Acts named after 'An Act to amend ...' in a long title (best effort)."""
+    match = re.search(r"\bto amend (?:the )?(.+)", title, re.IGNORECASE)
+    if not match:
+        return []
+    rest = AMEND_SPLIT.split(match.group(1))[0]
+    acts = [p.strip(" .") for p in AMEND_PARTS.split(rest) if p.strip(" .")]
+    return [a for a in acts if len(a) < 80][:4]
+
+
 def normalize(record: dict) -> dict | None:
     number = pick(record, NUMBER_KEYS)
     status = pick(record, STATUS_KEYS)
@@ -276,6 +327,17 @@ def normalize(record: dict) -> dict | None:
         if not SESSION_RE.match(session):
             session = CURRENT_SESSION
     number_ok = bool(BILL_NUMBER_RE.match(number))
+    dates = record_dates(record)
+    intro_dates = [d for k, d in dates.items() if "FirstReading" in k]
+    introduced = min(intro_dates) if intro_dates else None
+    latest_move = max(dates.values()) if dates else None
+    assent = dates.get("ReceivedRoyalAssentDateTime") or (best_date(record) if passed else None)
+    days_to_law = None
+    if passed and assent and introduced and assent >= introduced:
+        days_to_law = (assent.date() - introduced.date()).days
+    now = datetime.now(timezone.utc)
+    label = bill_type_label(record, number)
+    kind = {PMB_LABEL: "pmb", GOV_LABEL: "gov", SEN_GOV_LABEL: "gov", SEN_PUBLIC_LABEL: "senate"}.get(label, "other")
     return {
         "number": number,
         "short_title": short,
@@ -293,21 +355,55 @@ def normalize(record: dict) -> dict | None:
         "active_date": parse_date(pick(record, DATE_KEYS)),
         "sort_date": best_date(record),
         "breakdown": build_breakdown(number, short, long, origin, current, status, stage, passed),
+        "type_label": label,
+        "kind": kind,
+        "pro_forma": is_pro_forma(record),
+        "introduced": introduced,
+        "latest_move": latest_move,
+        "assent": assent,
+        "days_to_law": days_to_law,
+        "is_new": bool(introduced and (now - introduced).days <= 30),
+        "moved_recently": bool(latest_move and (now - latest_move).days <= 7),
+        "topic": topic_for(f"{long} {short}"),
+        "amends": amended_acts(long),
     }
 
 
-def top_active_bills(records: list[dict], limit: int = TOP_ACTIVE) -> list[dict]:
-    bills = [b for b in (normalize(r) for r in records) if b and is_active(b["status"])]
+ACTIVE_SORTS = ("progress", "recent", "number")
+ACTIVE_KINDS = ("gov", "pmb", "senate")
+ACTIVE_CHAMBERS = ("house", "senate")
 
-    # Stable sorts, least significant key first:
-    #   bill number -> furthest along its path -> most recent activity.
-    # Dated bills outrank undated ones, because the feed leaves dates blank
-    # on some records.
-    bills.sort(key=lambda b: bill_sort_key(b["number"]))
-    bills.sort(key=lambda b: b["stage_index"], reverse=True)
+
+def all_active_bills(records: list[dict], chamber: str = "", kind: str = "",
+                     q: str = "", sort: str = "progress") -> list[dict]:
+    """Every bill still moving, filtered and sorted. Pro forma placeholders are left out."""
+    bills = [b for b in (normalize(r) for r in records)
+             if b and is_active(b["status"]) and not b["pro_forma"]]
+    if chamber in ACTIVE_CHAMBERS:
+        bills = [b for b in bills if b["chamber_class"] == chamber]
+    if kind in ACTIVE_KINDS:
+        bills = [b for b in bills if b["kind"] == kind]
+    q = q.strip().lower()
+    if q:
+        bills = [b for b in bills if q in f"{b['number']} {b['title']} {b['short_title']}".lower()]
+
     epoch = datetime.min.replace(tzinfo=timezone.utc)
+    # Stable sorts, least significant key first.
+    bills.sort(key=lambda b: bill_sort_key(b["number"]))
+    if sort == "number":
+        return bills
+    if sort == "recent":
+        bills.sort(key=lambda b: b["latest_move"] or epoch, reverse=True)
+        return bills
+    # Default: furthest along its path, then most recent activity. Dated bills
+    # outrank undated ones, because the feed leaves dates blank on some records.
+    bills.sort(key=lambda b: b["stage_index"], reverse=True)
     bills.sort(key=lambda b: b["active_date"] or epoch, reverse=True)
-    return bills[:limit]
+    return bills
+
+
+def top_active_bills(records: list[dict], limit: int = TOP_ACTIVE) -> list[dict]:
+    return all_active_bills(records)[:limit]
 
 
 def recent_passed_bills(records: list[dict], limit: int = TOP_PASSED) -> tuple[list[dict], bool]:
@@ -319,6 +415,19 @@ def recent_passed_bills(records: list[dict], limit: int = TOP_PASSED) -> tuple[l
     top = bills[:limit]
     approximate = any(b["sort_date"] is None for b in top)
     return top, approximate
+
+
+def time_to_law_summary(bills: list[dict]) -> dict | None:
+    """Average, fastest and slowest days from first reading to royal assent."""
+    timed = [b for b in bills if b["days_to_law"] is not None]
+    if not timed:
+        return None
+    fastest = min(timed, key=lambda b: b["days_to_law"])
+    slowest = max(timed, key=lambda b: b["days_to_law"])
+    return {
+        "average": round(sum(b["days_to_law"] for b in timed) / len(timed)),
+        "fastest": fastest, "slowest": slowest, "count": len(timed),
+    }
 
 
 # --------------------------------------------------------------------------
@@ -479,6 +588,43 @@ def _find_caucus(node, person_id) -> str | None:
     return None
 
 
+def _first_int(item: dict, keys: tuple[str, ...]) -> int | None:
+    for key in keys:
+        value = item.get(key)
+        if isinstance(value, int) and not isinstance(value, bool):
+            return value
+    return None
+
+
+def _votes(raw_list) -> list[dict]:
+    out = []
+    for item in raw_list if isinstance(raw_list, list) else []:
+        if not isinstance(item, dict):
+            continue
+        yeas = _first_int(item, ("DivisionVotesYeas", "VotesYeas", "Yeas"))
+        nays = _first_int(item, ("DivisionVotesNays", "VotesNays", "Nays"))
+        if yeas is None or nays is None:
+            continue
+        out.append({"division": _first_int(item, ("DivisionNumber",)), "yeas": yeas, "nays": nays,
+                    "paired": _first_int(item, ("DivisionVotePaired", "VotesPaired", "Paired"))})
+    return out
+
+
+IN_FORCE_RE = re.compile(r"(?:comes?|coming) into (?:force|effect)", re.IGNORECASE)
+
+
+def find_in_force(summary_html: str) -> str | None:
+    """A sentence from the summary that says when the bill takes effect, if it has one."""
+    if not summary_html:
+        return None
+    text = html_lib.unescape(re.sub(r"<[^>]+>", " ", re.sub(r"(?i)<br\s*/?>", ". ", summary_html)))
+    text = re.sub(r"\s+", " ", text)
+    for sent in SENTENCE_SPLIT.split(text):
+        if IN_FORCE_RE.search(sent):
+            return trim_text(sent.strip(" ."), 240).rstrip(".") + "."
+    return None
+
+
 def fetch_bill_json(parl_session: str, number: str) -> dict | None:
     """Slimmed per-bill data, or None if Parliament's page couldn't be read."""
     key = (parl_session, number.upper())
@@ -510,6 +656,9 @@ def fetch_bill_json(parl_session: str, number: str) -> dict | None:
                 "long_title": (raw.get("LongTitleEn") or "").strip(),
                 "summary_html": raw.get("ShortLegislativeSummaryEn") or "",
                 "sponsor_caucus": _find_caucus(raw, sponsor_id) if sponsor_id else None,
+                "house_votes": _votes(raw.get("HouseVoteDetails")),
+                "senate_votes": _votes(raw.get("SenateVoteDetails")),
+                "in_force": find_in_force(raw.get("ShortLegislativeSummaryEn") or ""),
             }
     except (requests.RequestException, ValueError, IndexError):
         data = None
@@ -662,6 +811,7 @@ PARTY_RE = re.compile(
 
 _members_cache: dict = {"expires": 0.0, "parties": {}}
 _members_lock = threading.Lock()
+_members_fetch_lock = threading.Lock()
 
 
 def canon_party(text: str) -> str | None:
@@ -701,6 +851,11 @@ def parse_member_parties(page_html: str) -> dict[int, str]:
 
 def get_member_parties() -> dict[int, str]:
     """Current party of every sitting MP, keyed by PersonId. {} if it can't be read."""
+    with _members_fetch_lock:
+        return _get_member_parties_locked()
+
+
+def _get_member_parties_locked() -> dict[int, str]:
     now = time.time()
     with _members_lock:
         if now < _members_cache["expires"]:
@@ -774,6 +929,7 @@ def stats_rows(records: list[dict]) -> list[dict]:
             continue
         status = pick(rec, STATUS_KEYS)
         rows.append({
+            "topic": topic_for(f"{pick(rec, LONG_TITLE_KEYS)} {pick(rec, SHORT_TITLE_KEYS)}"),
             "number": number,
             "type": bill_type_label(rec, number),
             "group": status_group(status),
@@ -832,6 +988,73 @@ def stage_bars(rows: list[dict]) -> list[dict]:
     biggest = max(counts.values(), default=1)
     return [{"label": g, "count": counts[g], "width": round(counts[g] / biggest * 100)}
             for g in GROUP_ORDER if counts.get(g)]
+
+
+def monthly_laws(passed_bills: list[dict]) -> list[dict]:
+    """Bills that received royal assent, counted by month (empty months included)."""
+    counts = Counter((b["assent"].year, b["assent"].month) for b in passed_bills if b["assent"])
+    if not counts:
+        return []
+    top = max(counts.values())
+    (y, m), end = min(counts), max(counts)
+    out = []
+    while (y, m) <= end:
+        n = counts.get((y, m), 0)
+        out.append({"label": date(y, m, 1).strftime("%b %Y"), "count": n, "width": round(n / top * 100)})
+        y, m = (y + 1, 1) if m == 12 else (y, m + 1)
+    return out
+
+
+def topic_bars(rows: list[dict]) -> list[dict]:
+    counts = Counter(r["topic"] for r in rows)
+    order = sorted((t for t in counts if t != "Other"), key=lambda t: -counts[t])
+    if "Other" in counts:
+        order.append("Other")
+    top = max(counts.values(), default=1)
+    return [{"label": t, "count": counts[t], "width": round(counts[t] / top * 100)} for t in order]
+
+
+def origin_stats(records: list[dict]) -> dict | None:
+    """Where bills start, and how many have crossed to the other chamber."""
+    house_n = senate_n = house_reached_senate = senate_reached_house = 0
+    house_third = senate_third = 0
+    for rec in records:
+        number = pick(rec, NUMBER_KEYS)
+        if not number or is_pro_forma(rec):
+            continue
+        dates = record_dates(rec)
+        if any("PassedHouseThirdReading" in k for k in dates):
+            house_third += 1
+        if any("PassedSenateThirdReading" in k for k in dates):
+            senate_third += 1
+        if is_house_origin(rec, number):
+            house_n += 1
+            house_reached_senate += any("PassedSenateFirstReading" in k for k in dates)
+        else:
+            senate_n += 1
+            senate_reached_house += any("PassedHouseFirstReading" in k for k in dates)
+    if not (house_n or senate_n):
+        return None
+    return {
+        "donut": make_donut([("Started in the House of Commons", house_n, "#2b2d31"),
+                             ("Started in the Senate", senate_n, "#a9acb3")]),
+        "house_n": house_n, "senate_n": senate_n,
+        "house_reached_senate": house_reached_senate, "senate_reached_house": senate_reached_house,
+        "house_third": house_third, "senate_third": senate_third,
+    }
+
+
+def recent_introductions(records: list[dict], days: int = 30, limit: int = 8) -> dict:
+    bills = [b for b in (normalize(r) for r in records) if b and not b["pro_forma"] and b["is_new"]
+             and (datetime.now(timezone.utc) - b["introduced"]).days <= days]
+    bills.sort(key=lambda b: b["introduced"], reverse=True)
+    return {"days": days, "count": len(bills), "bills": bills[:limit]}
+
+
+def top_sponsors(party_rows: list[dict], limit: int = 8) -> list[dict]:
+    counts = Counter((r["sponsor"], r["party"]) for r in party_rows if r.get("sponsor"))
+    return [{"name": n, "party": p, "count": c, "colour": PARTY_COLOURS.get(p, OTHER_COLOUR)}
+            for (n, p), c in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0][0]))[:limit]]
 
 
 def _years_months_days(a: date, b: date) -> tuple[int, int, int]:
@@ -941,7 +1164,8 @@ def _run_party_job(records: list[dict]) -> None:
                     party = members[info["sponsor_id"]]
                 elif info["sponsor_caucus"]:
                     party = canon_party(info["sponsor_caucus"])
-            return {"number": number, "type": type_label, "party": party or "Unknown", "ok": info is not None}
+            return {"number": number, "type": type_label, "party": party or "Unknown", "ok": info is not None,
+                    "sponsor": (info or {}).get("sponsor_name") or ""}
 
         results = []
         with ThreadPoolExecutor(max_workers=PARTY_WORKERS) as pool:
@@ -970,17 +1194,42 @@ def _fetched_at():
     return datetime.fromtimestamp(_cache["fetched_at"]) if _cache["fetched_at"] else None
 
 
+def _int_arg(name: str, default: int, low: int, high: int) -> int:
+    try:
+        value = int(request.args.get(name, default))
+    except (TypeError, ValueError):
+        return default
+    return max(low, min(high, value))
+
+
 @app.route("/")
 def index():
     records, warning = fetch_records()
-    bills = top_active_bills(records)
-    if records and not bills and not warning:
+    chamber = request.args.get("chamber", "")
+    kind = request.args.get("kind", "")
+    sort = request.args.get("sort", "progress")
+    q = request.args.get("q", "").strip()[:80]
+    chamber = chamber if chamber in ACTIVE_CHAMBERS else ""
+    kind = kind if kind in ACTIVE_KINDS else ""
+    sort = sort if sort in ACTIVE_SORTS else "progress"
+    limit = _int_arg("limit", TOP_ACTIVE, TOP_ACTIVE, 400)
+
+    matches = all_active_bills(records, chamber, kind, q, sort)
+    bills = matches[:limit]
+    filters = {k: v for k, v in (("chamber", chamber), ("kind", kind), ("q", q),
+                                 ("sort", sort if sort != "progress" else "")) if v}
+    more_url = url_for("index", limit=limit + TOP_ACTIVE, **filters) if len(matches) > limit else None
+    if records and not matches and not warning and not (chamber or kind or q):
         warning = ("The feed loaded, but no bills could be read from it. LEGISinfo may have "
                    "renamed its fields; open /debug to see the keys it returns.")
     return render_template(
         "index.html",
         active_tab="active",
         bills=bills,
+        match_count=len(matches),
+        more_url=more_url,
+        chamber=chamber, kind=kind, sort=sort, q=q,
+        filtered=bool(chamber or kind or q),
         stages=[label for label, _ in STAGES],
         warning=warning,
         total=len(records),
@@ -991,17 +1240,75 @@ def index():
 @app.route("/passed")
 def passed():
     records, warning = fetch_records()
-    bills, approximate = recent_passed_bills(records)
+    limit = _int_arg("limit", TOP_PASSED, TOP_PASSED, 400)
+    everything, approximate = recent_passed_bills(records, limit=10**6)
+    bills = everything[:limit]
     return render_template(
         "passed.html",
         active_tab="passed",
         bills=bills,
-        approximate=approximate,
+        total_passed=len(everything),
+        more_url=url_for("passed", limit=limit + TOP_PASSED) if len(everything) > limit else None,
+        law_speed=time_to_law_summary(everything),
+        approximate=any(b["sort_date"] is None for b in bills),
         stages=[label for label, _ in STAGES],
         warning=warning,
         total=len(records),
         fetched_at=_fetched_at(),
     )
+
+
+@app.route("/following")
+def following():
+    """Cards for the bills a visitor has starred. The list lives in their browser and
+    arrives as ?b=C-2,S-3, so the server never stores anything about visitors."""
+    wanted = []
+    for part in request.args.get("b", "").split(",")[:60]:
+        part = part.strip().upper()
+        if BILL_NUMBER_RE.match(part) and part not in wanted:
+            wanted.append(part)
+    records, warning = fetch_records()
+    by_number = {}
+    for rec in records:
+        bill = normalize(rec)
+        if bill and bill["number"].upper() in wanted:
+            by_number[bill["number"].upper()] = bill
+    bills = [by_number[n] for n in wanted if n in by_number]
+    return render_template(
+        "following.html",
+        active_tab=None,
+        bills=bills,
+        asked=len(wanted),
+        stages=[label for label, _ in STAGES],
+        warning=warning,
+        total=len(records),
+        fetched_at=_fetched_at(),
+    )
+
+
+@app.route("/api/bill/<parl_session>/<number>")
+def bill_meta_api(parl_session: str, number: str):
+    """Sponsor, party and recorded votes for one bill; loaded into cards after the page appears."""
+    if not SESSION_RE.match(parl_session) or not BILL_NUMBER_RE.match(number):
+        abort(404)
+    info = fetch_bill_json(parl_session, number.upper())
+    if not info:
+        response = jsonify(ok=False)
+        response.headers["Cache-Control"] = "public, max-age=60"
+        return response
+    party = None
+    if info["sponsor_id"]:
+        party = get_member_parties().get(info["sponsor_id"]) or canon_party(info["sponsor_caucus"] or "")
+    response = jsonify(
+        ok=True,
+        sponsor=info["sponsor_name"], sponsor_title=info["sponsor_title"],
+        riding=info["sponsor_riding"], party=party,
+        house_vote=(info["house_votes"] or [None])[-1],
+        senate_vote=(info["senate_votes"] or [None])[-1],
+        in_force=info["in_force"],
+    )
+    response.headers["Cache-Control"] = "public, max-age=900"
+    return response
 
 
 @app.route("/summary/<parl_session>/<number>")
@@ -1068,6 +1375,7 @@ def stats():
     if records:
         ensure_party_job(records)
     rows = stats_rows(records)
+    passed_bills, _ = recent_passed_bills(records, limit=10**6)
     snap = party_snapshot()
 
     party = None
@@ -1080,6 +1388,7 @@ def stats():
             "unknown": sum(r["party"] == "Unknown" for r in prows),
             "members_found": snap["data"]["members_found"],
             "updated": datetime.fromtimestamp(snap["finished"]),
+            "sponsors": top_sponsors(prows),
         }
 
     return render_template(
@@ -1091,6 +1400,11 @@ def stats():
         outcomes=outcome_table(rows),
         bill_total=len(rows),
         party=party,
+        monthly=monthly_laws(passed_bills),
+        law_speed=time_to_law_summary(passed_bills),
+        topics=topic_bars(rows),
+        origin=origin_stats(records),
+        recent=recent_introductions(records),
         party_status=snap["status"],
         party_error=snap["error"],
         party_progress=(snap["done"], snap["total"]),

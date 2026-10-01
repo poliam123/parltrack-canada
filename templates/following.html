@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% from "_card.html" import bill_card %}
+
+{% block title %}My bills | ParlTrack Canada{% endblock %}
+
+{% block intro %}The bills you've starred. They're saved in this browser only.{% endblock %}
+
+{% block content %}
+  {% if bills %}
+  <ol class="space-y-4">
+    {% for bill in bills %}
+    <li>{{ bill_card(bill, stages) }}</li>
+    {% endfor %}
+  </ol>
+  {% if asked > bills|length %}
+  <p class="mt-4 text-sm text-ink-600">{{ asked - bills|length }} starred bill{{ '' if asked - bills|length == 1 else 's' }} aren't in the current feed (for example, from a past session).</p>
+  {% endif %}
+  {% else %}
+  <div class="rounded-lg bg-white p-5 text-sm text-ink-800 shadow-sm ring-1 ring-ink-200" id="empty">
+    <p class="font-semibold">You haven't starred any bills yet.</p>
+    <p class="mt-1 text-ink-600">Tap the star on any bill to follow it. Your list is saved in this browser on this device.</p>
+    <p class="mt-3"><a class="font-semibold underline decoration-maple-600 underline-offset-2" href="{{ url_for('index') }}">Browse active bills</a></p>
+  </div>
+  {% endif %}
+
+  <script>
+    // The list of starred bills lives in this browser; pass it to the server once to draw the cards.
+    (function () {
+      try {
+        if (new URLSearchParams(location.search).has('b')) { return; }
+        var list = JSON.parse(localStorage.getItem('parltrack.follow') || '[]');
+        if (list.length) { location.replace(location.pathname + '?b=' + encodeURIComponent(list.join(','))); }
+      } catch (e) { /* storage blocked: the empty message stays */ }
+    })();
+  </script>
+{% endblock %}

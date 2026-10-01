@@ -11,6 +11,15 @@
         {{ bill.status }}
       </span>
       {% endif %}
+      {% if bill.is_new %}
+      <span class="inline-flex items-center rounded-md bg-maple-50 px-2 py-1 text-xs font-semibold text-maple-700 ring-1 ring-inset ring-maple-100">New</span>
+      {% elif bill.moved_recently and not bill.passed %}
+      <span class="inline-flex items-center rounded-md bg-ink-100 px-2 py-1 text-xs font-semibold text-ink-700 ring-1 ring-inset ring-ink-200">Moved this week</span>
+      {% endif %}
+      <button type="button" data-follow="{{ bill.number }}" aria-pressed="false" aria-label="Follow {{ bill.number }}"
+              class="ml-auto inline-flex h-9 w-9 items-center justify-center rounded-md text-ink-400 hover:bg-ink-100 hover:text-maple-600 aria-pressed:text-maple-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink-800">
+        <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.8 6.8 19.6l1-5.8-4.3-4.1 5.9-.9L12 3.5z"/></svg>
+      </button>
     </div>
 
     <h2 class="mt-3 text-base font-semibold leading-snug text-ink-900">
@@ -18,6 +27,31 @@
     </h2>
     {% if bill.short_title and bill.title %}
     <p class="mt-1 text-sm text-ink-600">Short title: {{ bill.short_title }}</p>
+    {% endif %}
+
+    {% if bill.amends %}
+    <p class="mt-2 flex flex-wrap items-center gap-1.5 text-xs">
+      <span class="text-ink-500">Amends</span>
+      {% for act in bill.amends %}
+      <span class="rounded bg-ink-100 px-1.5 py-0.5 text-ink-700 ring-1 ring-inset ring-ink-200">{{ act }}</span>
+      {% endfor %}
+    </p>
+    {% endif %}
+
+    {% if bill.passed and bill.assent %}
+    <p class="mt-2 text-sm text-ink-700">
+      Royal assent {{ bill.assent.strftime('%B %-d, %Y') }}{% if bill.days_to_law is not none %}.
+      <span class="font-semibold text-ink-900">{{ bill.days_to_law }} day{{ '' if bill.days_to_law == 1 else 's' }}</span> from first reading to law{% endif %}.
+    </p>
+    {% endif %}
+
+    {% if bill.number_ok %}
+    <div class="mt-2 space-y-1 text-sm text-ink-600"
+         data-meta-url="{{ url_for('bill_meta_api', parl_session=bill.session, number=bill.number|upper) }}">
+      <p data-meta-sponsor hidden></p>
+      <p data-meta-vote hidden></p>
+      {% if bill.passed %}<p data-meta-force hidden></p>{% endif %}
+    </div>
     {% endif %}
 
     {% if bill.stage_index >= 0 %}

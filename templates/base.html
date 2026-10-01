@@ -97,16 +97,26 @@
   </main>
 
   <script>
-    // Loads each bill's official summary after the page appears, three at a time,
-    // so a slow response from Parliament's site never holds up the bill list.
     (function () {
-      var slots = Array.prototype.slice.call(document.querySelectorAll('[data-summary-url]'));
-      var next = 0;
+      // Runs a list of slots through a loader a few at a time, so a slow response from
+      // Parliament's site never holds up the page.
+      function queue(slots, load, width) {
+        var next = 0;
+        function worker() {
+          if (next >= slots.length) { return; }
+          load(slots[next++]).then(worker);
+        }
+        for (var i = 0; i < width; i++) { worker(); }
+      }
 
-      function load(slot) {
+      function getJson(url) {
+        return fetch(url, { headers: { 'Accept': 'application/json' } }).then(function (r) { return r.json(); });
+      }
+
+      // 1. Official summary text under "Proposed changes"
+      queue(Array.prototype.slice.call(document.querySelectorAll('[data-summary-url]')), function (slot) {
         var target = slot.querySelector('[data-summary-text]');
-        return fetch(slot.getAttribute('data-summary-url'), { headers: { 'Accept': 'application/json' } })
-          .then(function (res) { return res.json(); })
+        return getJson(slot.getAttribute('data-summary-url'))
           .then(function (data) {
             target.textContent = data.summary ||
               'No official summary was found for this bill. Read the bill text for details.';
@@ -115,14 +125,52 @@
             target.textContent = 'The summary could not be loaded. Reload the page to try again.';
           })
           .then(function () { slot.removeAttribute('aria-busy'); });
-      }
+      }, 3);
 
-      function worker() {
-        if (next >= slots.length) { return; }
-        load(slots[next++]).then(worker);
+      // 2. Sponsor, party, recorded votes, and in-force note
+      function show(el, text) { if (el && text) { el.textContent = text; el.hidden = false; } }
+      function voteText(label, v) {
+        if (!v) { return ''; }
+        return label + ': ' + v.yeas + ' for, ' + v.nays + ' against' + (v.paired ? ', ' + v.paired + ' paired' : '');
       }
+      queue(Array.prototype.slice.call(document.querySelectorAll('[data-meta-url]')), function (slot) {
+        return getJson(slot.getAttribute('data-meta-url'))
+          .then(function (d) {
+            if (!d.ok) { return; }
+            if (d.sponsor) {
+              show(slot.querySelector('[data-meta-sponsor]'),
+                   'Sponsor: ' + d.sponsor + (d.party ? ', ' + d.party : '') + (d.riding ? ' (' + d.riding + ')' : ''));
+            }
+            var votes = [voteText('Latest House vote', d.house_vote), voteText('Latest Senate vote', d.senate_vote)]
+              .filter(Boolean).join(' \u00b7 ');
+            show(slot.querySelector('[data-meta-vote]'), votes);
+            show(slot.querySelector('[data-meta-force]'), d.in_force ? 'In force: ' + d.in_force : '');
+          })
+          .catch(function () { /* the card is fine without it */ });
+      }, 2);
 
-      for (var i = 0; i < 3; i++) { worker(); }
+      // 3. Star buttons: the list of followed bills is kept in this browser only
+      var KEY = 'parltrack.follow';
+      function readList() { try { return JSON.parse(localStorage.getItem(KEY) || '[]'); } catch (e) { return []; } }
+      function writeList(list) { try { localStorage.setItem(KEY, JSON.stringify(list)); } catch (e) { /* storage blocked */ } }
+      function paint(btn, on) {
+        btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+        btn.setAttribute('aria-label', (on ? 'Stop following ' : 'Follow ') + btn.getAttribute('data-follow'));
+        var svg = btn.querySelector('svg');
+        if (svg) { svg.setAttribute('fill', on ? 'currentColor' : 'none'); }
+      }
+      var followed = readList();
+      Array.prototype.forEach.call(document.querySelectorAll('[data-follow]'), function (btn) {
+        var num = btn.getAttribute('data-follow');
+        paint(btn, followed.indexOf(num) !== -1);
+        btn.addEventListener('click', function () {
+          var list = readList();
+          var at = list.indexOf(num);
+          if (at === -1) { list.push(num); } else { list.splice(at, 1); }
+          writeList(list);
+          paint(btn, at === -1);
+        });
+      });
     })();
   </script>
 </body>

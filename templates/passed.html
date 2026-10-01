@@ -3,21 +3,51 @@
 
 {% block title %}Passed bills | ParlTrack Canada{% endblock %}
 
-{% block intro %}The {{ bills|length }} most recent bills to receive royal assent in the current session.{% endblock %}
+{% block intro %}Bills that have become law in the current session, newest first.{% endblock %}
 
 {% block content %}
+  {% if law_speed %}
+  <section class="mb-4 rounded-xl bg-white p-4 shadow-sm ring-1 ring-ink-200" aria-label="How fast bills became law">
+    <h2 class="text-xs font-bold uppercase tracking-widest text-maple-700">Time to law</h2>
+    <dl class="mt-3 grid grid-cols-3 gap-3 text-center">
+      <div class="rounded-lg bg-ink-50 p-2.5 ring-1 ring-inset ring-ink-200">
+        <dd class="text-xl font-bold text-ink-900">{{ law_speed.average }}</dd>
+        <dt class="text-xs text-ink-500">days on average</dt>
+      </div>
+      <div class="rounded-lg bg-ink-50 p-2.5 ring-1 ring-inset ring-ink-200">
+        <dd class="text-xl font-bold text-ink-900">{{ law_speed.fastest.days_to_law }}</dd>
+        <dt class="text-xs text-ink-500">fastest ({{ law_speed.fastest.number }})</dt>
+      </div>
+      <div class="rounded-lg bg-ink-50 p-2.5 ring-1 ring-inset ring-ink-200">
+        <dd class="text-xl font-bold text-ink-900">{{ law_speed.slowest.days_to_law }}</dd>
+        <dt class="text-xs text-ink-500">slowest ({{ law_speed.slowest.number }})</dt>
+      </div>
+    </dl>
+    <p class="mt-2 text-xs text-ink-500">Days from first reading to royal assent, across {{ law_speed.count }} bills.</p>
+  </section>
+  {% endif %}
+
   {% if bills and approximate %}
   <div class="mb-4 rounded-lg border-l-4 border-ink-600 bg-white p-4 text-sm text-ink-800 shadow-sm">
-    Some royal assent dates were missing from the feed, so this order is approximate and may not be the exact 10 most recent.
+    Some royal assent dates were missing from the feed, so this order is approximate.
   </div>
   {% endif %}
 
   {% if bills %}
+  <p class="mb-3 flex items-center justify-between text-sm text-ink-600">
+    <span>Showing {{ bills|length }} of {{ total_passed }} bills that became law.</span>
+    <a href="{{ url_for('following') }}" class="font-semibold text-ink-800 underline decoration-maple-600 underline-offset-2 hover:text-maple-700">&#9733; My bills</a>
+  </p>
   <ol class="space-y-4">
     {% for bill in bills %}
     <li>{{ bill_card(bill, stages) }}</li>
     {% endfor %}
   </ol>
+  {% if more_url %}
+  <p class="mt-5 text-center">
+    <a href="{{ more_url }}" class="inline-block rounded-md bg-ink-800 px-5 py-2.5 text-sm font-semibold text-white hover:bg-ink-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink-800">Show more bills</a>
+  </p>
+  {% endif %}
   {% elif not warning %}
   <div class="rounded-lg bg-white p-5 text-sm text-ink-800 shadow-sm ring-1 ring-ink-200">
     <p class="font-semibold">No bills with royal assent found.</p>
