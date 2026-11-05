@@ -42,7 +42,7 @@ import os
 import re
 import threading
 import time
-from collections import Counter
+from collections import Counter, defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime, timedelta, timezone
 from html.parser import HTMLParser
@@ -1356,7 +1356,7 @@ def get_committee_work(acr: str) -> dict | None:
     url = COMMITTEE_WORK_URL.format(acr=acr)
     data = None
     try:
-        resp = requests.get(url, timeout=20, headers={"User-Agent": "legis-bill-tracker/1.0"})
+        resp = requests.get(url, timeout=12, headers={"User-Agent": "PolitiKit/1.0 (+https://politikit.ca)"})
         resp.raise_for_status()
         data = parse_committee_work(resp.text, url)
         if not data["studies"] and not data["activities"]:
@@ -1364,7 +1364,7 @@ def get_committee_work(acr: str) -> dict | None:
     except requests.RequestException:
         data = None
     with _committee_work_lock:
-        _committee_work_cache[acr] = (now + (WORK_TTL if data else COMMITTEE_FAIL_TTL), data)
+        _committee_work_cache[acr] = (now + (WORK_TTL if data else COMMITTEE_DATA_RETRY), data)
     return data
 
 
@@ -2460,25 +2460,13 @@ def parse_committee_list(page_html: str) -> dict[str, str]:
 
 
 def get_committee_list() -> list[dict]:
-    now = time.time()
-    with _committee_lock:
-        if now < _committee_list_cache["expires"]:
-            return _committee_list_cache["items"]
-    parsed: dict[str, str] = {}
-    try:
-        resp = requests.get(COMMITTEE_LIST_URL, timeout=20, headers={"User-Agent": "legis-bill-tracker/1.0"})
-        resp.raise_for_status()
-        parsed = parse_committee_list(resp.text)
-    except requests.RequestException:
-        parsed = {}
-    if len(parsed) < 5:  # a real list has dozens; fewer means the page changed
-        parsed = {a: "" for a in COMMITTEE_NAMES}
-    # Only committees with a name we know are shown. The page's own link text is not used: it can be a
-    # label like "Access" rather than a real name.
-    items = [{"acr": a, "name": COMMITTEE_NAMES[a]} for a in parsed if a in COMMITTEE_NAMES]
-    items = [i for i in items if i["name"]]  # codes with no name are subcommittees (e.g. SFIN): leave them out
-    with _committee_lock:
-        _committee_list_cache.update(items=items, expires=now + COMMITTEE_TTL)
+    """The House committees PolitiKit has pages for. The House's own list page refuses this
+    server, so the list is built in; once memberships have been read, committees with no
+    members this session (not set up yet) are left out."""
+    items = [{"acr": a, "name": n} for a, n in COMMITTEE_NAMES.items()]
+    data = committee_snapshot()["data"]
+    if data and data.get("rosters"):
+        items = [i for i in items if i["acr"] in data["rosters"]]
     return items
 
 
@@ -2531,6 +2519,155 @@ def get_committee(acr: str) -> dict | None:
     with _committee_lock:
         _committee_cache[key] = {"data": data, "expires": now + (COMMITTEE_TTL if data else COMMITTEE_FAIL_TTL)}
     return data
+
+
+# --------------------------------------------------------------------------
+# Committee memberships and the bills before each committee
+#
+# The House of Commons refuses this server's requests for its Committees pages, so
+# memberships are read from each MP's profile XML (the same part of ourcommons.ca as the
+# voting records, which it does serve), and the bills each committee has studied come from
+# LEGISinfo. The Committees "Work" page is still tried in the background, for the full list
+# of studies, but a page view never waits on it.
+# --------------------------------------------------------------------------
+MEMBER_PROFILE_URL = "https://www.ourcommons.ca/members/en/{slug}({pid})/xml"
+COMMITTEE_DATA_TTL = 12 * 3600
+COMMITTEE_DATA_RETRY = 30 * 60
+COMMITTEE_WORKERS = 4
+COMMITTEE_ROLE_ORDER = {"Chair": 0, "Co-Chair": 0, "Vice-Chair": 1, "Member": 2}
+_COMMITTEE_BY_NAME = {_fold(name): acr for acr, name in COMMITTEE_NAMES.items()}
+
+_cdata: dict = {"status": "idle", "data": None, "finished": 0.0, "done": 0, "total": 0, "error": None}
+_cdata_lock = threading.Lock()
+
+
+def parse_member_committees(text: str, parl: str, sess: str, today: date) -> list[dict]:
+    """Current committee roles from an MP's profile XML: [{'acr', 'role', 'since'}]."""
+    out = []
+    for f in _xml_records(text, "CommitteeName"):
+        if f.get("ParliamentNumber") != parl or f.get("SessionNumber") != sess:
+            continue
+        end = f.get("ToDateTime", "")
+        if end and end[:10] < today.isoformat():
+            continue
+        acr = _COMMITTEE_BY_NAME.get(_fold(f.get("CommitteeName", "")))
+        if not acr:
+            continue  # subcommittees and legislative committees have no page here
+        role = f.get("AffiliationRoleName", "")
+        out.append({"acr": acr, "role": role if role in COMMITTEE_ROLE_ORDER else "Member",
+                    "since": f.get("FromDateTime", "")[:10]})
+    return out
+
+
+def committee_snapshot() -> dict:
+    with _cdata_lock:
+        return dict(_cdata)
+
+
+def ensure_committee_job() -> None:
+    now = time.time()
+    with _cdata_lock:
+        if _cdata["status"] == "running":
+            return
+        if _cdata["data"] is not None and now - _cdata["finished"] < COMMITTEE_DATA_TTL:
+            return
+        if _cdata["status"] == "error" and now - _cdata["finished"] < COMMITTEE_DATA_RETRY:
+            return
+        _cdata.update(status="running", done=0, total=0, error=None)
+    threading.Thread(target=_run_committee_job, daemon=True).start()
+
+
+def _run_committee_job() -> None:
+    try:
+        members = get_directory()["members"]
+        if not members:
+            raise RuntimeError("the House of Commons member list couldn't be read")
+        parl, sess = CURRENT_SESSION.split("-")
+        today = date.today()
+        records, _ = fetch_records()
+        bills = [b for b in (normalize(r) for r in records)
+                 if b and b["number_ok"] and not b["pro_forma"] and b["session"] == CURRENT_SESSION]
+        # A bill can only have been at committee once it's past first and second reading where it started.
+        studied = [b for b in bills if not re.search(r"first reading|introduc|second reading", b["status"], re.I)
+                   or (b["number"].upper().startswith("S-") and "house of commons" in b["status"].lower())]
+        with _cdata_lock:
+            _cdata["total"] = len(members) + len(studied) + len(COMMITTEE_NAMES)
+
+        def tick():
+            with _cdata_lock:
+                _cdata["done"] += 1
+
+        def profile(m):
+            url = MEMBER_PROFILE_URL.format(slug=member_slug(m["first"], m["last"]), pid=m["id"])
+            try:
+                resp = requests.get(url, timeout=20, headers={"User-Agent": "PolitiKit/1.0 (+https://politikit.ca)"})
+                resp.raise_for_status()
+                roles = parse_member_committees(resp.content.decode("utf-8-sig", errors="replace"), parl, sess, today)
+            except requests.RequestException:
+                roles = None
+            tick()
+            return m["id"], roles
+
+        def bill_committees(b):
+            info = fetch_bill_json(b["session"], b["number"])
+            tick()
+            return b, (info or {}).get("committees") or []
+
+        def work(acr):
+            data = get_committee_work(acr)
+            tick()
+            return acr, data
+
+        with ThreadPoolExecutor(max_workers=COMMITTEE_WORKERS) as pool:
+            profiles = list(pool.map(profile, members))
+            bill_rows = list(pool.map(bill_committees, studied))
+            works = dict(pool.map(work, list(COMMITTEE_NAMES)))
+
+        failed = sum(roles is None for _, roles in profiles)
+        if failed > len(members) * 0.3:
+            raise RuntimeError(f"the House of Commons didn't answer for {failed} of {len(members)} MPs")
+
+        rosters: dict[str, list] = defaultdict(list)
+        by_member: dict[int, list] = defaultdict(list)
+        for pid, roles in profiles:
+            for r in roles or []:
+                rosters[r["acr"]].append({"id": pid, "role": r["role"], "since": r["since"]})
+                by_member[pid].append(r)
+        for acr in rosters:
+            rosters[acr].sort(key=lambda p: (COMMITTEE_ROLE_ORDER.get(p["role"], 3), p["since"]))
+        for pid in by_member:
+            by_member[pid].sort(key=lambda r: (COMMITTEE_ROLE_ORDER.get(r["role"], 3), COMMITTEE_NAMES[r["acr"]]))
+
+        bills_by_acr: dict[str, list] = defaultdict(list)
+        for b, committees in bill_rows:
+            for c in committees:
+                if not c["senate"] and c["acr"] in COMMITTEE_NAMES:
+                    bills_by_acr[c["acr"]].append({"bill": b, "meetings": c["meetings"], "last": c["last"]})
+        for acr in bills_by_acr:
+            bills_by_acr[acr].sort(key=lambda x: x["last"] or "", reverse=True)
+
+        data = {"rosters": dict(rosters), "by_member": dict(by_member), "bills": dict(bills_by_acr),
+                "work": {acr: w for acr, w in works.items() if w}, "profiles_failed": failed}
+        with _cdata_lock:
+            _cdata.update(status="done", data=data, finished=time.time(), error=None)
+    except Exception as exc:  # the site must keep working whatever happens here
+        with _cdata_lock:
+            _cdata.update(status="error", finished=time.time(), error=str(exc))
+
+
+def committee_bills_view(entries: list[dict]) -> dict:
+    """Bills this committee has studied this session (from LEGISinfo): before it now, and earlier."""
+    now, earlier = [], []
+    for e in entries:
+        b = e["bill"]
+        low = b["status"].lower()
+        item = {"title": f"Bill {b['number']}, {b['short_title'] or b['title']}", "bill": b["number"].upper(),
+                "info": b, "url": "", "meetings": e["meetings"], "last": e["last"]}
+        if is_active(b["status"]) and "committee" in low and "senate" not in low:
+            now.append(item)
+        else:
+            earlier.append(item)
+    return {"bills_now": now, "bills_before": earlier, "studies": [], "source": "legisinfo"}
 
 
 # --------------------------------------------------------------------------
@@ -2893,6 +3030,7 @@ def warm_up() -> None:
         fetch_records()
         get_directory()
         ensure_lobby_job()
+        ensure_committee_job()
     except Exception:
         pass
 
@@ -3354,11 +3492,15 @@ def member_page(pid: int):
             lobby = lobbying.mp_summary(conn, pid, limit=5)
         finally:
             conn.close()
+    ensure_committee_job()
+    cdata = committee_snapshot()["data"]
+    committees = [{**r, "name": COMMITTEE_NAMES[r["acr"]]} for r in (cdata or {}).get("by_member", {}).get(pid, [])]
     return render_template(
         "member.html",
         active_tab="members",
         section="house",
         lobby=lobby,
+        committees=committees,
         m=member,
         colour=PARTY_COLOURS.get(member["party"], OTHER_COLOUR),
         votes=shown[:200],
@@ -3389,7 +3531,6 @@ def members_page():
     return render_template(
         "members.html",
         active_tab="members",
-        page_width="max-w-4xl",
         groups=party_groups(members),
         party_colours=PARTY_COLOURS,
         member_total=len(members),
@@ -3412,7 +3553,6 @@ def senate_page():
     return render_template(
         "senate.html",
         active_tab="members",
-        page_width="max-w-4xl",
         section="senate",
         groups=senate_groups(senators),
         member_total=len(senators),
@@ -3426,12 +3566,25 @@ def senate_page():
 
 @app.route("/committees")
 def committees_page():
+    ensure_committee_job()
+    snap = committee_snapshot()
+    data = snap["data"]
+    by_id = {m["id"]: m for m in get_directory()["members"]}
+    committees = []
+    for c in sorted(get_committee_list(), key=lambda c: c["name"]):
+        people = (data or {}).get("rosters", {}).get(c["acr"], [])
+        chairs = [by_id[p["id"]] for p in people if p["role"] in ("Chair", "Co-Chair") and p["id"] in by_id]
+        entries = (data or {}).get("bills", {}).get(c["acr"], [])
+        committees.append({**c, "chairs": chairs, "size": len(people),
+                           "bills_now": len(committee_bills_view(entries)["bills_now"])})
     return render_template(
         "committees.html",
         active_tab="members",
-        page_width="max-w-4xl",
         section="committees",
-        committees=get_committee_list(),
+        committees=committees,
+        loaded=data is not None,
+        pending=data is None and snap["status"] == "running",
+        party_colours=PARTY_COLOURS,
         list_url=COMMITTEE_LIST_URL,
         fetched_at=None,
         total=0,
@@ -3443,32 +3596,64 @@ def committee_page(acr: str):
     acr = acr.upper()
     if not re.match(r"^[A-Z]{3,6}$", acr):
         abort(404)
-    data = get_committee(acr)
+    ensure_committee_job()
+    snap = committee_snapshot()
+    data = snap["data"]
     by_id = {m["id"]: m for m in get_directory()["members"]}
     roster = {"Chair": [], "Vice-Chair": [], "Member": []}
-    if data:
-        for pid, role in data["people"]:
-            if pid in by_id:
-                roster.setdefault(role, []).append(by_id[pid])
+    co_chairs = False
+    found = False
+    if data is not None:
+        found = True
+        for p in data["rosters"].get(acr, []):
+            if p["id"] in by_id:
+                roster["Chair" if p["role"] == "Co-Chair" else p["role"]].append(by_id[p["id"]])
+                co_chairs = co_chairs or p["role"] == "Co-Chair"
+    elif snap["status"] == "error":
+        old = get_committee(acr)  # last resort: the committee's own page
+        if old:
+            found = True
+            for pid, role in old["people"]:
+                if pid in by_id:
+                    roster.setdefault(role, []).append(by_id[pid])
     records, _ = fetch_records()
-    work = committee_work_view(get_committee_work(acr), records)
+    work = None
+    if data is not None:
+        if data["work"].get(acr):
+            work = committee_work_view(data["work"][acr], records)
+        else:
+            work = committee_bills_view(data["bills"].get(acr, []))
     return render_template(
         "committee.html",
         active_tab="members",
-        page_width="max-w-4xl",
         section="committees",
         acr=acr,
         work=work,
         work_url=COMMITTEE_WORK_URL.format(acr=acr),
-        name=(data or {}).get("name") or ("Standing Committee on " + COMMITTEE_NAMES[acr] if acr in COMMITTEE_NAMES else acr),
+        name="Standing Committee on " + COMMITTEE_NAMES[acr] if acr in COMMITTEE_NAMES else acr,
         roster=roster,
+        co_chairs=co_chairs,
         roster_total=sum(len(v) for v in roster.values()),
-        found=bool(data),
+        found=found,
+        pending=data is None and snap["status"] == "running",
         official_url=HOUSE_COMMITTEE_URL.format(acr=acr),
         party_colours=PARTY_COLOURS,
         fetched_at=None,
         total=0,
     )
+
+
+@app.route("/api/committees/status")
+def committees_status_api():
+    """Polled by the committee pages while memberships are being read."""
+    ensure_committee_job()
+    snap = committee_snapshot()
+    response = jsonify(ready=snap["data"] is not None, status=snap["status"], done=snap["done"],
+                       total=snap["total"], error=snap["error"],
+                       profiles_failed=(snap["data"] or {}).get("profiles_failed"),
+                       work_pages=len((snap["data"] or {}).get("work", {})))
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 @app.route("/api/snapshot")

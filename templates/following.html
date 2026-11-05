@@ -3,13 +3,14 @@
 
 {% block title %}My bills | PolitiKit{% endblock %}
 
+{% block heading %}My bills{% endblock %}
 {% block intro %}The bills you've starred. They're saved in this browser only.{% endblock %}
 
 {% block content %}
   {% if bills %}
-  <ol class="space-y-4">
+  <ol class="grid grid-cols-1 gap-5 lg:grid-cols-2 2xl:grid-cols-3">
     {% for bill in bills %}
-    <li>{{ bill_card(bill, stages, loop.index0) }}</li>
+    <li class="min-w-0">{{ bill_card(bill, stages, loop.index0) }}</li>
     {% endfor %}
   </ol>
   {% if export_url %}

@@ -2,6 +2,7 @@
 
 {% block title %}Senators | PolitiKit{% endblock %}
 
+{% block heading %}Senators{% endblock %}
 {% block intro %}Every sitting senator, grouped by Senate group. Search by name or province.{% endblock %}
 
 {% block content %}
@@ -16,7 +17,7 @@
   </p>
 </div>
 {% else %}
-<p class="mb-5 rounded-xl bg-ink-50 px-4 py-3 text-sm text-ink-700 ring-1 ring-inset ring-ink-200">
+<p class="mb-5 max-w-5xl rounded-xl bg-ink-50 px-4 py-3 text-sm text-ink-700 ring-1 ring-inset ring-ink-200">
   This list is compiled from Wikipedia, because the Senate doesn't publish one in a form this site can read.
   It can lag behind new appointments and retirements, and it has no photos or contact details.
   For those, use <a class="font-semibold underline decoration-maple-600/60 underline-offset-2" href="{{ official_url }}" target="_blank" rel="noopener">the Senate's own senator pages</a>.
@@ -55,7 +56,7 @@
     {{ g.party }}
     <span class="text-sm font-normal text-ink-500"><span data-count>{{ g.members|length }}</span> senators</span>
   </h2>
-  <ul class="grid gap-3 sm:grid-cols-2">
+  <ul class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
     {% for s in g.members %}
     <li data-member data-province="{{ s.province }}" data-search="{{ s.search }}">
       <article class="rise flex gap-4 rounded-2xl bg-paper p-4 shadow-[0_1px_2px_rgb(0_0_0/0.04)] ring-1 ring-ink-200" style="--i: {{ loop.index0 }}; border-left: 4px solid {{ g.colour }}">

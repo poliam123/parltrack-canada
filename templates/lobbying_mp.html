@@ -10,11 +10,12 @@
 {% include "_members_nav.html" %}
 <a href="{{ url_for('member_page', pid=m.id) }}" class="mb-3 inline-flex items-center gap-1 text-sm font-medium text-ink-600 hover:text-ink-900">&larr; {{ m.name }}</a>
 
-<div class="mb-5">{{ member_card(m, colour, 0) }}</div>
-
 {% if summary is none %}
   {{ pending(lobby_status) }}
 {% else %}
+<div class="grid grid-cols-1 items-start gap-6 lg:grid-cols-[22rem_minmax(0,1fr)] 2xl:grid-cols-[26rem_minmax(0,1fr)]">
+  <aside class="min-w-0 space-y-5">
+    {{ member_card(m, colour, 0) }}
 <section class="rise rounded-2xl bg-paper p-5 shadow-sm ring-1 ring-ink-200 sm:p-6" aria-labelledby="sum-h">
   <h2 id="sum-h" class="font-serif text-lg font-semibold text-ink-900">Lobbying since the current Parliament opened</h2>
   <dl class="mt-3 grid grid-cols-2 gap-3 text-sm">
@@ -36,8 +37,9 @@
   <p class="mt-4 flex flex-wrap gap-1.5">{% for s in summary.subjects %}<span class="inline-flex rounded-full bg-ink-100 px-2 py-0.5 text-[0.6875rem] font-medium text-ink-700">{{ s.name }} · {{ s.n }}</span>{% endfor %}</p>
   {% endif %}
 </section>
-
-<section class="rise mt-4 rounded-2xl bg-paper p-5 shadow-sm ring-1 ring-ink-200 sm:p-6" aria-labelledby="reports-h">
+  </aside>
+  <div class="min-w-0">
+<section class="rise rounded-2xl bg-paper p-5 shadow-sm ring-1 ring-ink-200 sm:p-6" aria-labelledby="reports-h">
   <h2 id="reports-h" class="font-serif text-lg font-semibold text-ink-900">Every reported meeting</h2>
   <p class="mt-1 text-sm text-ink-500">Newest first, back to November 2021 if {{ m.name }} held office then.</p>
   <div class="mt-4">
@@ -46,6 +48,8 @@
   </div>
   {{ pager(pages) }}
 </section>
+  </div>
+</div>
 
 {{ source_note(lobby_meta, attribution, licence_url, open_data_url) }}
 {% endif %}

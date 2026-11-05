@@ -3,6 +3,7 @@
 
 {% block title %}Active bills | PolitiKit{% endblock %}
 
+{% block heading %}Active bills{% endblock %}
 {% block intro %}Bills still moving through the current session. Search, filter and sort them below.{% endblock %}
 
 {% block content %}
@@ -15,11 +16,11 @@
   </section>
 
   <form method="get" action="{{ url_for('index') }}" role="search"
-        class="mb-4 rounded-2xl bg-paper p-4 shadow-sm ring-1 ring-ink-200">
-    <label for="q" class="sr-only">Search bills</label>
+        class="mb-5 flex flex-wrap items-end gap-3 rounded-2xl bg-paper p-4 shadow-sm ring-1 ring-ink-200">
+    <label class="block min-w-[16rem] flex-1 text-xs"><span class="mb-1 block font-medium text-ink-500">Search</span>
     <input id="q" name="q" type="search" value="{{ q }}" placeholder="Search a keyword or number, e.g. housing or C-5"
-           class="w-full rounded-md border-0 bg-ink-50 px-3 py-2 text-sm text-ink-900 ring-1 ring-inset ring-ink-200 placeholder:text-ink-400 focus:outline-none focus:ring-2 focus:ring-maple-600">
-    <div class="mt-2 grid grid-cols-3 gap-2 text-xs">
+           class="w-full rounded-md border-0 bg-ink-50 px-3 py-2 text-sm text-ink-900 ring-1 ring-inset ring-ink-200 placeholder:text-ink-400 focus:outline-none focus:ring-2 focus:ring-maple-600"></label>
+    <div class="grid grid-cols-3 gap-3 text-xs lg:w-[36rem]">
       <label class="block"><span class="mb-1 block font-medium text-ink-500">Chamber</span>
         <select name="chamber" class="w-full rounded-md border-0 bg-ink-50 py-2 pl-2 pr-6 text-sm text-ink-900 ring-1 ring-inset ring-ink-200 focus:ring-2 focus:ring-maple-600">
           <option value="">Both</option>
@@ -40,19 +41,19 @@
           <option value="number" {{ 'selected' if sort == 'number' }}>Bill number</option>
         </select></label>
     </div>
-    <div class="mt-3 flex flex-wrap items-center gap-3">
+    <div class="flex flex-wrap items-center gap-3 pb-0.5">
       <button type="submit" class="rounded-md bg-maple-600 px-4 py-2 text-sm font-semibold text-white hover:bg-maple-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink-800">Apply</button>
       {% if filtered or sort != 'progress' %}<a href="{{ url_for('index') }}" class="text-sm text-ink-600 underline decoration-maple-600 underline-offset-2 hover:text-ink-900">Clear</a>{% endif %}
       <a href="{{ export_url }}" class="inline-flex items-center gap-1 text-sm text-ink-600 hover:text-ink-900" download><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0l-4-4m4 4l4-4M5 20h14"/></svg>Spreadsheet</a>
-      <a href="{{ url_for('following') }}" class="ml-auto text-sm font-semibold text-ink-800 underline decoration-maple-600/60 underline-offset-2 hover:text-maple-700">&#9733; My bills</a>
+      <a href="{{ url_for('following') }}" class="text-sm font-semibold text-ink-800 underline decoration-maple-600/60 underline-offset-2 hover:text-maple-700">&#9733; My bills</a>
     </div>
   </form>
 
   {% if bills %}
   <p class="mb-3 text-sm text-ink-600" aria-live="polite">Showing {{ bills|length }} of {{ match_count }} bill{{ '' if match_count == 1 else 's' }}{% if filtered %} matching your filters{% endif %}.</p>
-  <ol class="space-y-4">
+  <ol class="grid grid-cols-1 gap-5 lg:grid-cols-2 2xl:grid-cols-3">
     {% for bill in bills %}
-    <li>{{ bill_card(bill, stages, loop.index0) }}</li>
+    <li class="min-w-0">{{ bill_card(bill, stages, loop.index0) }}</li>
     {% endfor %}
   </ol>
   {% if more_url %}

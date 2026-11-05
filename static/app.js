@@ -328,6 +328,22 @@
     setTimeout(rpoll, 1500);
   }
 
+  /* ---- Committee pages: reload once memberships have been read ---- */
+  var committeePending = $('#committee-pending');
+  if (committeePending) {
+    var ctries = 0;
+    var cpoll = function () {
+      ctries++;
+      getJson(committeePending.getAttribute('data-url'))
+        .then(function (d) {
+          if (d.ready || d.status === 'error') { location.reload(); return; }
+          if (ctries < 60) { setTimeout(cpoll, 4000); }
+        })
+        .catch(function () { if (ctries < 60) { setTimeout(cpoll, 6000); } });
+    };
+    setTimeout(cpoll, 3000);
+  }
+
   /* ---- Lobbying pages: poll while the registry is being loaded, then reload once ---- */
   var lobbyPending = $('#lobby-pending');
   if (lobbyPending) {

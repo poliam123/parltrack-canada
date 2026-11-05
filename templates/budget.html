@@ -3,11 +3,12 @@
 
 {% block title %}Federal budget | PolitiKit{% endblock %}
 
+{% block heading %}Federal budget{% endblock %}
 {% block intro %}Where federal money comes from and where it goes, from the most recent federal budget. All figures are the government's own, in billions of dollars.{% endblock %}
 
 {% block content %}
 {% include "_stats_nav.html" %}
-<div class="space-y-4">
+<div class="columns-1 gap-5 lg:columns-2 2xl:columns-3 [&>*]:mb-5 [&>*]:break-inside-avoid">
 
   {# ---------- Headline ---------- #}
   <section class="rise rounded-2xl bg-paper p-5 shadow-sm ring-1 ring-ink-200 sm:p-6" aria-labelledby="budget-h">

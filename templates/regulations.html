@@ -2,10 +2,11 @@
 
 {% block title %}Regulations | PolitiKit{% endblock %}
 
+{% block heading %}Regulations{% endblock %}
 {% block intro %}Regulations set the detailed rules that put acts of Parliament into practice. The government publishes proposed regulations in the Canada Gazette so anyone can comment before they're final. Routine technical orders are left out.{% endblock %}
 
 {% macro reg_card(r, proposed) %}
-<li class="rise rounded-2xl bg-paper p-4 shadow-[0_1px_2px_rgb(0_0_0/0.04)] ring-1 ring-ink-200 sm:p-5">
+<li class="rise min-w-0 rounded-2xl bg-paper p-4 shadow-[0_1px_2px_rgb(0_0_0/0.04)] ring-1 ring-ink-200 sm:p-5">
   <div class="flex flex-wrap items-center gap-2 text-xs">
     {% if proposed %}
       {% if r.deadline %}
@@ -83,15 +84,18 @@
   </div>
   {% endif %}
 {% else %}
+  {# Both lists side by side on the "All" view; one list fills the width as a grid of cards. #}
+  {% set list_class = 'space-y-3' if view == 'all' else 'grid grid-cols-1 gap-4 lg:grid-cols-2 2xl:grid-cols-3' %}
+  <div class="{{ 'grid grid-cols-1 items-start gap-8 xl:grid-cols-2' if view == 'all' else '' }}">
 
   {% if view in ('all', 'proposed') %}
-  <section aria-labelledby="open-h" class="mb-8">
+  <section aria-labelledby="open-h" class="mb-8 min-w-0">
     <h2 id="open-h" class="mb-1 flex items-center gap-2 text-xs font-bold uppercase tracking-[0.18em] text-maple-700">
       <span class="h-px w-6 bg-maple-600" aria-hidden="true"></span>Open for comment ({{ data.proposed|length }})
     </h2>
     <p class="mb-3 text-sm text-ink-600">Proposed regulations from Part I of the Gazette whose comment period hasn't ended. Soonest deadline first.</p>
     {% if data.proposed %}
-    <ul class="space-y-3">{% for r in data.proposed %}{{ reg_card(r, true) }}{% endfor %}</ul>
+    <ul class="{{ list_class }}">{% for r in data.proposed %}{{ reg_card(r, true) }}{% endfor %}</ul>
     {% else %}
     <p class="rounded-xl bg-paper p-4 text-sm text-ink-600 ring-1 ring-ink-200">No proposed regulations are open for comment right now.</p>
     {% endif %}
@@ -99,18 +103,19 @@
   {% endif %}
 
   {% if view in ('all', 'final') %}
-  <section aria-labelledby="final-h">
+  <section aria-labelledby="final-h" class="min-w-0">
     <h2 id="final-h" class="mb-1 flex items-center gap-2 text-xs font-bold uppercase tracking-[0.18em] text-ink-700">
       <span class="h-px w-6 bg-ink-400" aria-hidden="true"></span>New final regulations ({{ data.final|length }})
     </h2>
     <p class="mb-3 text-sm text-ink-600">Regulations made in the last few weeks, from Part II of the Gazette. Newest first.</p>
     {% if data.final %}
-    <ul class="space-y-3">{% for r in data.final %}{{ reg_card(r, false) }}{% endfor %}</ul>
+    <ul class="{{ list_class }}">{% for r in data.final %}{{ reg_card(r, false) }}{% endfor %}</ul>
     {% else %}
     <p class="rounded-xl bg-paper p-4 text-sm text-ink-600 ring-1 ring-ink-200">No new final regulations in recent issues.</p>
     {% endif %}
   </section>
   {% endif %}
+  </div>
 
   <p class="mt-6 text-xs text-ink-500">
     From the <a class="underline decoration-ink-400 underline-offset-2" href="{{ gazette_home }}" target="_blank" rel="noopener">Canada Gazette</a>,

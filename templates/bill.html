@@ -20,7 +20,9 @@
   Back to bills
 </a>
 
-<article class="rise mt-3 overflow-hidden rounded-2xl bg-paper shadow-[0_1px_2px_rgb(0_0_0/0.04),0_6px_20px_-12px_rgb(0_0_0/0.18)] ring-1 ring-ink-200">
+<div class="mt-3 grid grid-cols-1 items-start gap-6 xl:grid-cols-[minmax(0,1fr)_28rem] 2xl:grid-cols-[minmax(0,1fr)_32rem]">
+  <div class="min-w-0 space-y-5">
+<article class="rise overflow-hidden rounded-2xl bg-paper shadow-[0_1px_2px_rgb(0_0_0/0.04),0_6px_20px_-12px_rgb(0_0_0/0.18)] ring-1 ring-ink-200">
 
   <header class="border-b border-ink-200 p-5 sm:p-7">
     <div class="flex flex-wrap items-center gap-2">
@@ -49,7 +51,7 @@
     {% endif %}
   </header>
 
-  <div class="px-5 py-7 sm:px-9 sm:py-9">
+  <div class="max-w-4xl px-5 py-7 sm:px-9 sm:py-9">
     <p class="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.18em] text-maple-700">
       <span class="h-px w-6 bg-maple-600" aria-hidden="true"></span>Proposed changes
     </p>
@@ -107,8 +109,42 @@
   </footer>
 </article>
 
+<section class="rise rounded-2xl bg-paper p-5 shadow-[0_1px_2px_rgb(0_0_0/0.04)] ring-1 ring-ink-200 sm:p-7" style="--i: 4" aria-labelledby="debate-h">
+  <h2 id="debate-h" class="font-serif text-lg font-semibold text-ink-900">What MPs said</h2>
+  {% if debates %}
+  <p class="mt-1 text-sm text-ink-500">The most recent recorded speeches on this bill. Links go to the official transcript of that sitting.</p>
+  <ul class="mt-4 divide-y divide-ink-100">
+    {% for d in debates %}
+    <li class="py-3">
+      <p class="text-[0.9375rem] text-ink-900"><span class="font-semibold">{{ d.name }}</span>{% if d.party %} <span class="text-ink-500">&middot; {{ d.party }}</span>{% endif %}</p>
+      <p class="text-sm text-ink-600">
+        {{ d.kind }}{% if d.when %}, {{ d.when.strftime('%B %-d, %Y') }}{% endif %}{{ ' (Senate)' if d.senate else ' (House)' }}
+        {% if d.link %}&middot; <a class="font-semibold text-maple-700 underline decoration-maple-600/50 underline-offset-2 hover:decoration-maple-600" href="{{ d.link }}" target="_blank" rel="noopener">Read the transcript</a>{% endif %}
+      </p>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="mt-1 text-sm text-ink-500">No speeches are recorded for this bill yet.</p>
+  {% endif %}
+  <p class="mt-4 text-sm">
+    <a class="text-ink-700 underline decoration-ink-400 underline-offset-2 hover:text-ink-900" href="{{ debates_url }}" target="_blank" rel="noopener">Full debates and votes on OpenParliament.ca</a>
+    <span class="text-xs text-ink-500">(an independent site)</span>
+  </p>
+</section>
+
+<section class="rise rounded-2xl bg-paper p-5 shadow-[0_1px_2px_rgb(0_0_0/0.04)] ring-1 ring-ink-200 sm:p-7" style="--i: 5" aria-labelledby="note-h">
+  <h2 id="note-h" class="font-serif text-lg font-semibold text-ink-900">Your note</h2>
+  <label for="bill-note" class="sr-only">Personal note about {{ number }}</label>
+  <textarea id="bill-note" data-bill="{{ number }}" rows="3" maxlength="1000" placeholder="Jot down why you're following this bill&hellip;"
+            class="mt-3 w-full rounded-lg border-0 bg-ink-50 px-3 py-2.5 text-sm text-ink-900 ring-1 ring-inset ring-ink-200 placeholder:text-ink-400 focus:outline-none focus:ring-2 focus:ring-maple-600"></textarea>
+  <p id="bill-note-status" class="mt-1.5 text-xs text-ink-500">Saved on this device only. Star the bill to see your note on its card.</p>
+</section>
+  </div>
+
+  <aside class="min-w-0 space-y-5" aria-label="Progress and activity">
 {% if timeline %}
-<section class="rise mt-4 rounded-2xl bg-paper p-5 shadow-[0_1px_2px_rgb(0_0_0/0.04)] ring-1 ring-ink-200 sm:p-7" style="--i: 2" aria-labelledby="timeline-h">
+<section class="rise rounded-2xl bg-paper p-5 shadow-[0_1px_2px_rgb(0_0_0/0.04)] ring-1 ring-ink-200 sm:p-7" style="--i: 2" aria-labelledby="timeline-h">
   <h2 id="timeline-h" class="font-serif text-lg font-semibold text-ink-900">The path to law</h2>
   <p class="mt-1 text-sm text-ink-500">Every bill has to clear each step, in both chambers. Tap a step's name to learn what it means.</p>
   <ol class="mt-5">
@@ -145,7 +181,7 @@
 {% endif %}
 
 {% if committees %}
-<section class="rise mt-4 rounded-2xl bg-paper p-5 shadow-[0_1px_2px_rgb(0_0_0/0.04)] ring-1 ring-ink-200 sm:p-7" style="--i: 3" aria-labelledby="committee-h">
+<section class="rise rounded-2xl bg-paper p-5 shadow-[0_1px_2px_rgb(0_0_0/0.04)] ring-1 ring-ink-200 sm:p-7" style="--i: 3" aria-labelledby="committee-h">
   <h2 id="committee-h" class="font-serif text-lg font-semibold text-ink-900">Committee study</h2>
   <p class="mt-1 text-sm text-ink-500">After second reading, a <button type="button" class="term" data-term="committee-stage">committee</button> examines the bill clause by clause.</p>
   <ul class="mt-4 divide-y divide-ink-100">
@@ -166,7 +202,7 @@
 {% endif %}
 
 {% if lobby and lobby.orgs %}
-<section class="rise mt-4 rounded-2xl bg-paper p-5 shadow-[0_1px_2px_rgb(0_0_0/0.04)] ring-1 ring-ink-200 sm:p-7" style="--i: 4" aria-labelledby="lobby-h">
+<section class="rise rounded-2xl bg-paper p-5 shadow-[0_1px_2px_rgb(0_0_0/0.04)] ring-1 ring-ink-200 sm:p-7" style="--i: 4" aria-labelledby="lobby-h">
   <h2 id="lobby-h" class="font-serif text-lg font-semibold text-ink-900">Who's lobbying on it</h2>
   <p class="mt-1 text-sm text-ink-500">
     {{ lobby.orgs|length }} organization{{ '' if lobby.orgs|length == 1 else 's' }} named this bill in their lobbying registration or in
@@ -193,38 +229,8 @@
   <p class="mt-4 text-xs text-ink-500">From the Commissioner of Lobbying. A bill is listed when the lobbyist's description makes clear it means this bill, not one with the same number from another Parliament.</p>
 </section>
 {% endif %}
-
-<section class="rise mt-4 rounded-2xl bg-paper p-5 shadow-[0_1px_2px_rgb(0_0_0/0.04)] ring-1 ring-ink-200 sm:p-7" style="--i: 4" aria-labelledby="debate-h">
-  <h2 id="debate-h" class="font-serif text-lg font-semibold text-ink-900">What MPs said</h2>
-  {% if debates %}
-  <p class="mt-1 text-sm text-ink-500">The most recent recorded speeches on this bill. Links go to the official transcript of that sitting.</p>
-  <ul class="mt-4 divide-y divide-ink-100">
-    {% for d in debates %}
-    <li class="py-3">
-      <p class="text-[0.9375rem] text-ink-900"><span class="font-semibold">{{ d.name }}</span>{% if d.party %} <span class="text-ink-500">&middot; {{ d.party }}</span>{% endif %}</p>
-      <p class="text-sm text-ink-600">
-        {{ d.kind }}{% if d.when %}, {{ d.when.strftime('%B %-d, %Y') }}{% endif %}{{ ' (Senate)' if d.senate else ' (House)' }}
-        {% if d.link %}&middot; <a class="font-semibold text-maple-700 underline decoration-maple-600/50 underline-offset-2 hover:decoration-maple-600" href="{{ d.link }}" target="_blank" rel="noopener">Read the transcript</a>{% endif %}
-      </p>
-    </li>
-    {% endfor %}
-  </ul>
-  {% else %}
-  <p class="mt-1 text-sm text-ink-500">No speeches are recorded for this bill yet.</p>
-  {% endif %}
-  <p class="mt-4 text-sm">
-    <a class="text-ink-700 underline decoration-ink-400 underline-offset-2 hover:text-ink-900" href="{{ debates_url }}" target="_blank" rel="noopener">Full debates and votes on OpenParliament.ca</a>
-    <span class="text-xs text-ink-500">(an independent site)</span>
-  </p>
-</section>
-
-<section class="rise mt-4 rounded-2xl bg-paper p-5 shadow-[0_1px_2px_rgb(0_0_0/0.04)] ring-1 ring-ink-200 sm:p-7" style="--i: 5" aria-labelledby="note-h">
-  <h2 id="note-h" class="font-serif text-lg font-semibold text-ink-900">Your note</h2>
-  <label for="bill-note" class="sr-only">Personal note about {{ number }}</label>
-  <textarea id="bill-note" data-bill="{{ number }}" rows="3" maxlength="1000" placeholder="Jot down why you're following this bill&hellip;"
-            class="mt-3 w-full rounded-lg border-0 bg-ink-50 px-3 py-2.5 text-sm text-ink-900 ring-1 ring-inset ring-ink-200 placeholder:text-ink-400 focus:outline-none focus:ring-2 focus:ring-maple-600"></textarea>
-  <p id="bill-note-status" class="mt-1.5 text-xs text-ink-500">Saved on this device only. Star the bill to see your note on its card.</p>
-</section>
+  </aside>
+</div>
 
 <script>
   // "Back" returns to whichever list you came from (active or passed), when possible.

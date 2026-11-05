@@ -3,6 +3,7 @@
 
 {% block title %}Members of Parliament | PolitiKit{% endblock %}
 
+{% block heading %}Members of Parliament{% endblock %}
 {% block intro %}Every sitting MP in the House of Commons, grouped by party. Search by name or riding, or find your own MP by postal code.{% endblock %}
 
 {% block content %}
@@ -15,8 +16,9 @@
 </div>
 {% else %}
 
+<div class="mb-6 grid grid-cols-1 items-start gap-5 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
 {# ---------- Find your MP ---------- #}
-<section class="rise mb-5 rounded-2xl bg-paper p-5 shadow-sm ring-1 ring-ink-200" aria-labelledby="find-h">
+<section class="rise rounded-2xl bg-paper p-5 shadow-sm ring-1 ring-ink-200" aria-labelledby="find-h">
   <h2 id="find-h" class="font-serif text-lg font-semibold text-ink-900">Find your MP</h2>
   <form method="get" action="{{ url_for('members_page') }}" class="mt-3 flex gap-2">
     <label for="postal" class="sr-only">Postal code</label>
@@ -30,7 +32,7 @@
   <div class="mt-4" aria-live="polite">
     {% if lookup.matches %}
     <p class="mb-3 text-sm text-ink-700">{{ lookup.postal }} is in <strong class="font-semibold text-ink-900">{{ lookup.ridings|join(' / ') }}</strong>.</p>
-    <ul class="grid gap-3">
+    <ul class="grid gap-3 xl:grid-cols-2">
       {% for m in lookup.matches %}
       {% set colour = party_colours.get(m.party, '#d6d7da') %}
       <li>{{ member_card(m, colour) }}</li>
@@ -44,7 +46,7 @@
 </section>
 
 {# ---------- Browse ---------- #}
-<section class="mb-5 rounded-2xl bg-paper p-5 shadow-sm ring-1 ring-ink-200" aria-label="Search and filter members">
+<section class="rounded-2xl bg-paper p-5 shadow-sm ring-1 ring-ink-200" aria-label="Search and filter members">
   <div class="grid gap-3 sm:grid-cols-[1fr_14rem]">
     <label class="block">
       <span class="mb-1 block text-xs font-medium text-ink-500">Search by name or riding</span>
@@ -77,6 +79,7 @@
     </a>
   </p>
 </section>
+</div>
 
 {% if not has_contacts %}
 <p class="mb-5 rounded-xl bg-ink-50 px-4 py-3 text-sm text-ink-700 ring-1 ring-inset ring-ink-200">Photos and contact details are unavailable right now. Names, ridings and parties are still shown.</p>
@@ -88,7 +91,7 @@
     {{ g.party }}
     <span class="text-sm font-normal text-ink-500"><span data-count>{{ g.members|length }}</span> MPs</span>
   </h2>
-  <ul class="grid gap-3 sm:grid-cols-2">
+  <ul class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
     {% for m in g.members %}
     <li data-member data-province="{{ m.province }}" data-search="{{ m.search }}">{{ member_card(m, g.colour, loop.index0) }}</li>
     {% endfor %}

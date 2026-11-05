@@ -1,7 +1,7 @@
 {% macro bill_card(bill, stages, i=0) %}
-<article data-bill="{{ bill.number }}" class="rise overflow-hidden rounded-2xl bg-paper shadow-[0_1px_2px_rgb(0_0_0/0.04),0_6px_20px_-12px_rgb(0_0_0/0.18)] ring-1 ring-ink-200" style="--i: {{ i }}">
+<article data-bill="{{ bill.number }}" class="rise flex h-full flex-col overflow-hidden rounded-2xl bg-paper shadow-[0_1px_2px_rgb(0_0_0/0.04),0_6px_20px_-12px_rgb(0_0_0/0.18)] ring-1 ring-ink-200" style="--i: {{ i }}">
 
-  <div class="p-5">
+  <div class="flex-1 p-5">
     <div class="flex flex-wrap items-center gap-2">
       <span class="inline-flex items-center rounded-md bg-maple-600 px-2.5 py-1 text-sm font-bold tracking-wide text-white">{{ bill.number }}</span>
       {% if bill.status %}

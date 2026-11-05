@@ -2,11 +2,12 @@
 
 {% block title %}Compare bills | PolitiKit{% endblock %}
 
+{% block heading %}Compare bills{% endblock %}
 {% block intro %}Pick any two bills to see how they line up.{% endblock %}
 
 {% block content %}
-<form method="get" action="{{ url_for('compare') }}" class="rise mb-5 rounded-2xl bg-paper p-5 shadow-sm ring-1 ring-ink-200">
-  <div class="grid gap-3 sm:grid-cols-2">
+<form method="get" action="{{ url_for('compare') }}" class="rise mb-5 flex flex-wrap items-end gap-4 rounded-2xl bg-paper p-5 shadow-sm ring-1 ring-ink-200">
+  <div class="grid min-w-0 flex-1 gap-3 sm:grid-cols-2">
     {% for key, label in (('a', 'First bill'), ('b', 'Second bill')) %}
     {% set chosen = selected[loop.index0] %}
     <label class="block">
@@ -20,7 +21,7 @@
     </label>
     {% endfor %}
   </div>
-  <button type="submit" class="mt-4 rounded-lg bg-maple-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-maple-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink-800">Compare</button>
+  <button type="submit" class="rounded-lg bg-maple-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-maple-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink-800">Compare</button>
 </form>
 
 {% if rows %}

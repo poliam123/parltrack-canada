@@ -492,6 +492,11 @@ class BillResolver:
                 return sitting
         return None
 
+    def exists_on(self, session: str | None, number: str, when: date | None) -> bool:
+        """Whether that session had a bill with this number by this date."""
+        return any(c["session"] == session and (not when or not c["introduced"] or c["introduced"] <= when)
+                   for c in self.by_number.get(number, []))
+
     def label(self, session: str, number: str) -> str:
         for c in self.by_number.get(number, []):
             if c["session"] == session:
@@ -539,6 +544,10 @@ def resolve_all(items: list[dict], resolver: BillResolver) -> list[dict]:
     number (an organization that wrote "Bill C-27, Digital Charter" elsewhere means the same bill
     when it writes just "Bill C-27"); then the sitting session as a last resort."""
     by_org: dict[tuple, Counter] = defaultdict(Counter)
+    numbers_in_text: dict = defaultdict(set)
+    for it in items:
+        if it.get("text_key") is not None:
+            numbers_in_text[it["text_key"]].add(it["number"])
     pending = []
     for it in items:
         session, how = resolver.evidence(it["number"], it["window"], it["when"])
@@ -556,6 +565,12 @@ def resolve_all(items: list[dict], resolver: BillResolver) -> list[dict]:
             if n >= 1 and (len(votes) == 1 or n > sum(votes.values()) - n):
                 it["session"], it["how"] = session, "organization"
                 continue
+        # A description that also names bills the sitting session doesn't have ("C27..., C56...")
+        # is talking about older bills, so its other numbers aren't assumed to be current either.
+        sitting = session_on(it["when"]) if it["when"] else None
+        others = numbers_in_text.get(it.get("text_key"), set()) - {it["number"]}
+        if any(not resolver.exists_on(sitting, n, it["when"]) for n in others):
+            continue
         session = resolver.fallback(it["number"], it["window"], it["when"], it["kind"])
         if session:
             it["session"], it["how"] = session, "date"
@@ -810,7 +825,8 @@ def build_database(reg_zip: str, comm_zip: str, out_path: str, members: list[dic
                 client, cdate = keep[cid_i]
                 for number, window, snippet, kind in finder(desc):
                     mentions.append({"source": "comm", "ref": cid_i, "client": client, "number": number,
-                                     "window": window, "when": _ymd(cdate), "kind": kind, "snippet": snippet})
+                                     "window": window, "when": _ymd(cdate), "kind": kind, "snippet": snippet,
+                                     "text_key": hash(desc)})
         except SchemaError:
             pass  # older exports had no descriptions
         det_w.flush()
@@ -867,7 +883,8 @@ def build_database(reg_zip: str, comm_zip: str, out_path: str, members: list[dic
             client, eff, active = regs[rid_i]
             for number, window, snippet, kind in finder(desc):
                 reg_mentions.append({"source": "reg", "ref": rid_i, "client": client, "number": number,
-                                     "window": window, "when": _ymd(eff), "kind": kind, "snippet": snippet})
+                                     "window": window, "when": _ymd(eff), "kind": kind, "snippet": snippet,
+                                     "text_key": hash(desc)})
         rdet_w.flush()
         finder = None
         say("Reading subject areas", 2, 5)

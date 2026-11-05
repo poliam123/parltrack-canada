@@ -2,10 +2,11 @@
 
 {% block title %}{% if q %}{{ q }} · {% endif %}Search | PolitiKit{% endblock %}
 
+{% block heading %}Search{% endblock %}
 {% block intro %}Search bills, MPs, senators, committees, regulations, lobbying organizations and lobbyists, and the glossary. Try a bill number like C-15, a riding, a name or a topic.{% endblock %}
 
 {% macro group(title, count) %}
-<section class="rise mb-6" aria-label="{{ title }}">
+<section class="rise mb-6 break-inside-avoid" aria-label="{{ title }}">
   <h2 class="mb-2 flex items-center gap-2 text-xs font-bold uppercase tracking-[0.18em] text-ink-700">
     <span class="h-px w-6 bg-ink-400" aria-hidden="true"></span>{{ title }} <span class="font-semibold text-ink-500">{{ count }}</span>
   </h2>
@@ -16,7 +17,7 @@
 {% endmacro %}
 
 {% block content %}
-<form method="get" action="{{ url_for('search_page') }}" role="search" class="mb-6 flex gap-2">
+<form method="get" action="{{ url_for('search_page') }}" role="search" class="mb-6 flex max-w-3xl gap-2">
   <label for="q" class="sr-only">Search PolitiKit</label>
   <input id="q" name="q" type="search" value="{{ q }}" maxlength="100" placeholder="Search bills, MPs, committees…" {% if not q %}autofocus{% endif %}
          class="min-w-0 flex-1 rounded-lg border-0 bg-paper px-3 py-2.5 text-sm text-ink-900 ring-1 ring-inset ring-ink-200 placeholder:text-ink-400 focus:outline-none focus:ring-2 focus:ring-maple-600">
@@ -28,6 +29,7 @@
   <p class="rounded-2xl bg-paper p-5 text-sm text-ink-700 shadow-sm ring-1 ring-ink-200">Nothing matched “{{ q }}”. Try fewer words, or a bill number like C-15.</p>
   {% else %}
   <p class="mb-4 text-sm text-ink-600">{{ total }} result{{ '' if total == 1 else 's' }} for “{{ q }}”.</p>
+  <div class="columns-1 gap-8 lg:columns-2 2xl:columns-3">
 
   {% if results.bills %}
   {% call group('Bills', results.bills|length) %}
@@ -120,6 +122,7 @@
     {% endfor %}
   {% endcall %}
   {% endif %}
+  </div>
   {% endif %}
 {% endif %}
 {% endblock %}

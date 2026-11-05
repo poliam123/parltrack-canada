@@ -1,6 +1,5 @@
 {% extends "base.html" %}
 {% from "_lobbying.html" import report_list, pager, pending, source_note, monthly_chart with context %}
-{% set page_width = 'max-w-3xl' %}
 
 {% block title %}{{ org.name if org else 'Organization' }} · Lobbying | PolitiKit{% endblock %}
 
@@ -27,59 +26,9 @@
   {% if org.last_date %}<p class="mt-3 text-xs text-ink-500">Most recent reported meeting: {{ org.last_date|day }}.</p>{% endif %}
 </article>
 
-{% if org.bills %}
-<section class="rise mt-4 rounded-2xl bg-paper p-5 shadow-sm ring-1 ring-ink-200 sm:p-7" aria-labelledby="bills-h">
-  <h2 id="bills-h" class="font-serif text-lg font-semibold text-ink-900">Bills they've lobbied on</h2>
-  <p class="mt-1 text-sm text-ink-500">Named in their own descriptions of meetings or of their registration. Their words are quoted below each bill.</p>
-  <ul class="mt-4 divide-y divide-ink-100">
-    {% for b in org.bills %}
-    <li class="py-3">
-      <p class="flex flex-wrap items-center gap-2">
-        <a href="{{ url_for('bill_detail', parl_session=b.session, number=b.number) }}" class="inline-flex items-center rounded-md bg-night px-2 py-0.5 text-xs font-bold tracking-wide text-white hover:opacity-90">Bill {{ b.number }}</a>
-        {% if b.session != current_session %}<span class="text-xs text-ink-500">{{ b.session }} (previous Parliament)</span>{% endif %}
-        <span class="text-xs text-ink-600">{{ b.n }} mention{{ '' if b.n == 1 else 's' }}{% if b.last %} · latest {{ b.last|day }}{% endif %}</span>
-        {% if b.registered %}<span class="rounded bg-maple-50 px-1.5 py-0.5 text-[0.6875rem] font-bold uppercase tracking-wide text-maple-700">In registration</span>{% endif %}
-      </p>
-      {% if b.snippet %}<p class="mt-1.5 text-sm italic leading-relaxed text-ink-700">“{{ b.snippet }}”</p>{% endif %}
-    </li>
-    {% endfor %}
-  </ul>
-</section>
-{% endif %}
-
-{% if org.top_mps or org.top_institutions %}
-<section class="rise mt-4 rounded-2xl bg-paper p-5 shadow-sm ring-1 ring-ink-200 sm:p-7" aria-labelledby="met-h">
-  <h2 id="met-h" class="font-serif text-lg font-semibold text-ink-900">Who they meet</h2>
-  <p class="mt-1 text-sm text-ink-500">Since the current Parliament opened.</p>
-  <div class="mt-4 grid gap-6 sm:grid-cols-2">
-    {% if org.top_mps %}
-    <div>
-      <h3 class="text-xs font-bold uppercase tracking-[0.18em] text-ink-500">MPs</h3>
-      <ul class="mt-2 space-y-1.5 text-sm">
-        {% for row in org.top_mps %}{% set mp = mps.get(row.id) %}{% if mp %}
-        <li class="flex items-baseline justify-between gap-3">
-          <span class="min-w-0 truncate"><span class="swatch mr-1.5 inline-block h-2 w-2 rounded-full" style="background: {{ party_colours.get(mp.party, '#d6d7da') }}" aria-hidden="true"></span><a href="{{ url_for('member_page', pid=mp.id) }}" class="font-medium text-ink-900 hover:text-maple-700">{{ mp.name }}</a> <span class="text-ink-500">{{ mp.party }}</span></span>
-          <span class="shrink-0 tabular-nums text-ink-700">{{ row.n }}</span>
-        </li>
-        {% endif %}{% endfor %}
-      </ul>
-    </div>
-    {% endif %}
-    {% if org.top_institutions %}
-    <div>
-      <h3 class="text-xs font-bold uppercase tracking-[0.18em] text-ink-500">Institutions</h3>
-      <ul class="mt-2 space-y-1.5 text-sm">
-        {% for i in org.top_institutions %}
-        <li class="flex items-baseline justify-between gap-3"><span class="min-w-0 text-ink-800">{{ i.name }}</span><span class="shrink-0 tabular-nums text-ink-700">{{ i.n }}</span></li>
-        {% endfor %}
-      </ul>
-    </div>
-    {% endif %}
-  </div>
-</section>
-{% endif %}
-
-<section class="rise mt-4 rounded-2xl bg-paper p-5 shadow-sm ring-1 ring-ink-200 sm:p-7" aria-labelledby="regs-h">
+<div class="mt-6 grid grid-cols-1 items-start gap-6 xl:grid-cols-[minmax(0,1fr)_27rem] 2xl:grid-cols-[minmax(0,1fr)_31rem]">
+  <div class="min-w-0 space-y-6">
+<section class="rise rounded-2xl bg-paper p-5 shadow-sm ring-1 ring-ink-200 sm:p-7" aria-labelledby="regs-h">
   <h2 id="regs-h" class="font-serif text-lg font-semibold text-ink-900">Registrations in effect</h2>
   {% if not org.registrations %}
   <p class="mt-1 text-sm text-ink-600">{{ org.name }} has no active registration. Organizations must register once paid lobbying passes the legal threshold, and their registration ends when it stops.</p>
@@ -133,7 +82,7 @@
   {% endfor %}
 </section>
 
-<section class="rise mt-4 rounded-2xl bg-paper p-5 shadow-sm ring-1 ring-ink-200 sm:p-7" aria-labelledby="reports-h">
+<section class="rise rounded-2xl bg-paper p-5 shadow-sm ring-1 ring-ink-200 sm:p-7" aria-labelledby="reports-h">
   <div class="flex flex-wrap items-baseline justify-between gap-2">
     <h2 id="reports-h" class="font-serif text-lg font-semibold text-ink-900">Reported meetings</h2>
     {% if reports %}<a href="{{ export_url }}" class="inline-flex items-center gap-1 text-sm text-ink-600 hover:text-ink-900" download><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0l-4-4m4 4l4-4M5 20h14"/></svg>Spreadsheet</a>{% endif %}
@@ -147,6 +96,61 @@
   </div>
   {{ pager(pages) }}
 </section>
+  </div>
+  <aside class="min-w-0 space-y-6" aria-label="Bills and contacts">
+{% if org.bills %}
+<section class="rise rounded-2xl bg-paper p-5 shadow-sm ring-1 ring-ink-200 sm:p-7" aria-labelledby="bills-h">
+  <h2 id="bills-h" class="font-serif text-lg font-semibold text-ink-900">Bills they've lobbied on</h2>
+  <p class="mt-1 text-sm text-ink-500">Named in their own descriptions of meetings or of their registration. Their words are quoted below each bill.</p>
+  <ul class="mt-4 divide-y divide-ink-100">
+    {% for b in org.bills %}
+    <li class="py-3">
+      <p class="flex flex-wrap items-center gap-2">
+        <a href="{{ url_for('bill_detail', parl_session=b.session, number=b.number) }}" class="inline-flex items-center rounded-md bg-night px-2 py-0.5 text-xs font-bold tracking-wide text-white hover:opacity-90">Bill {{ b.number }}</a>
+        {% if b.session != current_session %}<span class="text-xs text-ink-500">{{ b.session }} (previous Parliament)</span>{% endif %}
+        <span class="text-xs text-ink-600">{{ b.n }} mention{{ '' if b.n == 1 else 's' }}{% if b.last %} · latest {{ b.last|day }}{% endif %}</span>
+        {% if b.registered %}<span class="rounded bg-maple-50 px-1.5 py-0.5 text-[0.6875rem] font-bold uppercase tracking-wide text-maple-700">In registration</span>{% endif %}
+      </p>
+      {% if b.snippet %}<p class="mt-1.5 text-sm italic leading-relaxed text-ink-700">“{{ b.snippet }}”</p>{% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
+
+{% if org.top_mps or org.top_institutions %}
+<section class="rise rounded-2xl bg-paper p-5 shadow-sm ring-1 ring-ink-200 sm:p-7" aria-labelledby="met-h">
+  <h2 id="met-h" class="font-serif text-lg font-semibold text-ink-900">Who they meet</h2>
+  <p class="mt-1 text-sm text-ink-500">Since the current Parliament opened.</p>
+  <div class="mt-4 grid gap-6 sm:grid-cols-2 xl:grid-cols-1">
+    {% if org.top_mps %}
+    <div>
+      <h3 class="text-xs font-bold uppercase tracking-[0.18em] text-ink-500">MPs</h3>
+      <ul class="mt-2 space-y-1.5 text-sm">
+        {% for row in org.top_mps %}{% set mp = mps.get(row.id) %}{% if mp %}
+        <li class="flex items-baseline justify-between gap-3">
+          <span class="min-w-0 truncate"><span class="swatch mr-1.5 inline-block h-2 w-2 rounded-full" style="background: {{ party_colours.get(mp.party, '#d6d7da') }}" aria-hidden="true"></span><a href="{{ url_for('member_page', pid=mp.id) }}" class="font-medium text-ink-900 hover:text-maple-700">{{ mp.name }}</a> <span class="text-ink-500">{{ mp.party }}</span></span>
+          <span class="shrink-0 tabular-nums text-ink-700">{{ row.n }}</span>
+        </li>
+        {% endif %}{% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+    {% if org.top_institutions %}
+    <div>
+      <h3 class="text-xs font-bold uppercase tracking-[0.18em] text-ink-500">Institutions</h3>
+      <ul class="mt-2 space-y-1.5 text-sm">
+        {% for i in org.top_institutions %}
+        <li class="flex items-baseline justify-between gap-3"><span class="min-w-0 text-ink-800">{{ i.name }}</span><span class="shrink-0 tabular-nums text-ink-700">{{ i.n }}</span></li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+  </div>
+</section>
+{% endif %}
+  </aside>
+</div>
 
 {{ source_note(lobby_meta, attribution, licence_url, open_data_url) }}
 {% endif %}

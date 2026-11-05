@@ -4,11 +4,12 @@
 
 {% block title %}Statistics | PolitiKit{% endblock %}
 
+{% block heading %}Statistics{% endblock %}
 {% block intro %}How the {{ clock.parliament }} Parliament's bills break down, and how long it has been sitting.{% endblock %}
 
 {% block content %}
 {% if has_budget %}{% include "_stats_nav.html" %}{% endif %}
-<div class="space-y-4">
+<div class="columns-1 gap-5 lg:columns-2 2xl:columns-3 [&>*]:mb-5 [&>*]:break-inside-avoid">
 
   {# ---------- Parliament clock ---------- #}
   <section class="rise overflow-hidden rounded-2xl bg-paper shadow-sm ring-1 ring-ink-200" aria-labelledby="clock-h">

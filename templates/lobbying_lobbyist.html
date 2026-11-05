@@ -1,6 +1,5 @@
 {% extends "base.html" %}
 {% from "_lobbying.html" import report_list, pager, pending, source_note, monthly_chart with context %}
-{% set page_width = 'max-w-3xl' %}
 
 {% block title %}{{ person.name if person else 'Lobbyist' }} · Lobbying | PolitiKit{% endblock %}
 
@@ -39,7 +38,19 @@
   {% if person.reports %}{{ monthly_chart(person.monthly, 'Meetings reported by ' ~ person.name) }}{% endif %}
 </article>
 
-<section class="rise mt-4 rounded-2xl bg-paper p-5 shadow-sm ring-1 ring-ink-200 sm:p-7" aria-labelledby="clients-h">
+<div class="mt-6 grid grid-cols-1 items-start gap-6 xl:grid-cols-[minmax(0,1fr)_27rem] 2xl:grid-cols-[minmax(0,1fr)_31rem]">
+  <div class="min-w-0">
+<section class="rise rounded-2xl bg-paper p-5 shadow-sm ring-1 ring-ink-200 sm:p-7" aria-labelledby="reports-h">
+  <h2 id="reports-h" class="font-serif text-lg font-semibold text-ink-900">Reported meetings</h2>
+  <div class="mt-4">
+    {% if reports %}{{ report_list(reports, mps, party_colours, show_registrant=false, current_session=current_session) }}
+    {% else %}<p class="text-sm text-ink-600">No meetings reported since November 2021.</p>{% endif %}
+  </div>
+  {{ pager(pages) }}
+</section>
+  </div>
+  <aside class="min-w-0">
+<section class="rise rounded-2xl bg-paper p-5 shadow-sm ring-1 ring-ink-200 sm:p-7" aria-labelledby="clients-h">
   <h2 id="clients-h" class="font-serif text-lg font-semibold text-ink-900">{{ 'Current clients' if person.kind == 1 else 'Registered for' }}</h2>
   {% if person.clients %}
   <ul class="mt-3 divide-y divide-ink-100">
@@ -68,15 +79,8 @@
   </ul>
   {% endif %}
 </section>
-
-<section class="rise mt-4 rounded-2xl bg-paper p-5 shadow-sm ring-1 ring-ink-200 sm:p-7" aria-labelledby="reports-h">
-  <h2 id="reports-h" class="font-serif text-lg font-semibold text-ink-900">Reported meetings</h2>
-  <div class="mt-4">
-    {% if reports %}{{ report_list(reports, mps, party_colours, show_registrant=false, current_session=current_session) }}
-    {% else %}<p class="text-sm text-ink-600">No meetings reported since November 2021.</p>{% endif %}
-  </div>
-  {{ pager(pages) }}
-</section>
+  </aside>
+</div>
 
 {{ source_note(lobby_meta, attribution, licence_url, open_data_url) }}
 {% endif %}
