@@ -36,17 +36,17 @@ import requests
 # --------------------------------------------------------------------------
 # Sources
 # --------------------------------------------------------------------------
-REGISTRATIONS_URL = os.environ.get(
-    "LOBBY_REGISTRATIONS_URL",
-    "https://lobbycanada.gc.ca/media/zwcjycef/registrations_enregistrements_ocl_cal.zip")
-COMMUNICATIONS_URL = os.environ.get(
-    "LOBBY_COMMUNICATIONS_URL",
-    "https://lobbycanada.gc.ca/media/mqbbmaqk/communications_ocl_cal.zip")
-# The Commissioner's site may refuse automated downloads (its bot protection answers 403).
-# Then PolitiKit uses copies of the same two ZIPs uploaded, with their original file names,
-# to the newest release of the PolitiKit GitHub repository.
+# The Commissioner's site refuses automated downloads (its bot protection answers 403), so
+# PolitiKit never contacts it. Each week the two ZIPs from its open data page are uploaded, with
+# their original file names, to a new release of the PolitiKit GitHub repository, and PolitiKit
+# reads them from the newest release.
 MIRROR_URL = os.environ.get("LOBBY_MIRROR", "https://github.com/poliam123/parltrack-canada/releases/latest/download/")
 ZIP_NAMES = {"registrations": "registrations_enregistrements_ocl_cal.zip", "communications": "communications_ocl_cal.zip"}
+REGISTRATIONS_URL = os.environ.get("LOBBY_REGISTRATIONS_URL", MIRROR_URL + ZIP_NAMES["registrations"])
+COMMUNICATIONS_URL = os.environ.get("LOBBY_COMMUNICATIONS_URL", MIRROR_URL + ZIP_NAMES["communications"])
+# Where the files come from originally (shown to readers, never downloaded automatically).
+OFFICIAL_URLS = {"registrations": "https://lobbycanada.gc.ca/media/zwcjycef/registrations_enregistrements_ocl_cal.zip",
+                 "communications": "https://lobbycanada.gc.ca/media/mqbbmaqk/communications_ocl_cal.zip"}
 OPEN_DATA_PAGE = "https://lobbycanada.gc.ca/en/open-data/"
 LICENCE_URL = "https://lobbycanada.gc.ca/en/open-data/open-data-licence-agreement/"
 ATTRIBUTION = ("Contains information licensed under the Open Data Licence Agreement — "
@@ -613,16 +613,12 @@ def download(url: str, dest: str, progress=None, kind: str = "") -> dict:
 
 
 def download_any(kind: str, dest: str, progress=None) -> dict:
-    """Try the Commissioner's site, then the GitHub copy. Raises with every reason if both fail."""
-    official = REGISTRATIONS_URL if kind == "registrations" else COMMUNICATIONS_URL
-    urls = [official] + ([MIRROR_URL + ZIP_NAMES[kind]] if MIRROR_URL else [])
-    problems = []
-    for url in urls:
-        try:
-            return download(url, dest, progress, kind if url == official else "")
-        except RuntimeError as exc:
-            problems.append(str(exc))
-    raise RuntimeError(" Then: ".join(problems))
+    """Download one ZIP from the GitHub release (never from the Commissioner's site)."""
+    url = REGISTRATIONS_URL if kind == "registrations" else COMMUNICATIONS_URL
+    try:
+        return download(url, dest, progress)
+    except RuntimeError as exc:
+        raise RuntimeError(f"{exc}. Check that the newest GitHub release has {ZIP_NAMES[kind]} attached.") from exc
 
 
 def remote_modified(url: str) -> str | None:
