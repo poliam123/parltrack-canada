@@ -92,7 +92,7 @@
 {% if status and status.status == 'error' %}
 <div role="alert" class="rounded-2xl border-l-4 border-maple-600 bg-paper p-5 text-sm text-ink-800 shadow-sm ring-1 ring-ink-200">
   <p class="font-semibold text-ink-900">The lobbying registry couldn't be loaded just now.</p>
-  <p class="mt-1 text-ink-700">PolitiKit will try again in about half an hour. In the meantime you can search the
+  <p class="mt-1 text-ink-700">PolitiKit will try again in a few hours. In the meantime you can search the
     <a class="font-semibold underline underline-offset-2" href="https://lobbycanada.gc.ca/app/secure/ocl/lrs/do/advSrch" target="_blank" rel="noopener">official Registry of Lobbyists</a>.</p>
   {% if status.error %}<p class="mt-2 break-words text-xs text-ink-500">Details: {{ status.error }}</p>{% endif %}
 </div>

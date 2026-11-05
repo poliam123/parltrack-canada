@@ -2679,8 +2679,8 @@ def senate_groups(senators: list[dict]) -> list[dict]:
 # --------------------------------------------------------------------------
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 LOBBY_CHECK_EVERY = 12 * 3600       # look for new files this often
-LOBBY_MAX_AGE = 8 * 24 * 3600       # rebuild after this long even if the server won't say what changed
-LOBBY_RETRY_AFTER = 30 * 60         # wait this long after a failed build
+LOBBY_MAX_AGE = 3 * 24 * 3600       # rebuild after this long even if the server won't say what changed
+LOBBY_RETRY_AFTER = 3 * 3600        # wait this long after a failed build
 LOBBY_INCOMPLETE_RETRY = 6 * 3600   # rebuild sooner if the MP list or a session's bills were missing
 LOBBY_BUILD_TIMEOUT = 40 * 60
 LOBBY_PAGE = lobbying.PAGE_SIZE
@@ -2781,9 +2781,7 @@ def _run_lobby_job() -> None:
         records, _ = fetch_records()
         job = {"db": lobbying.DB_PATH, "progress": lobbying.PROGRESS_PATH,
                "members": [{"id": m["id"], "first": m["first"], "last": m["last"]} for m in members],
-               "bills": bills_for_lobbying(records),
-               "reg_url": meta.get("reg_url") or lobbying.REGISTRATIONS_URL,
-               "comm_url": meta.get("comm_url") or lobbying.COMMUNICATIONS_URL}
+               "bills": bills_for_lobbying(records)}
         fd, job_path = tempfile.mkstemp(prefix="politikit-lobby-job-", suffix=".json")
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(job, f)

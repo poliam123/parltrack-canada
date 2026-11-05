@@ -42,6 +42,11 @@ REGISTRATIONS_URL = os.environ.get(
 COMMUNICATIONS_URL = os.environ.get(
     "LOBBY_COMMUNICATIONS_URL",
     "https://lobbycanada.gc.ca/media/mqbbmaqk/communications_ocl_cal.zip")
+# The Commissioner's site may refuse automated downloads (its bot protection answers 403).
+# Then PolitiKit uses copies of the same two ZIPs uploaded, with their original file names,
+# to the newest release of the PolitiKit GitHub repository.
+MIRROR_URL = os.environ.get("LOBBY_MIRROR", "https://github.com/poliam123/parltrack-canada/releases/latest/download/")
+ZIP_NAMES = {"registrations": "registrations_enregistrements_ocl_cal.zip", "communications": "communications_ocl_cal.zip"}
 OPEN_DATA_PAGE = "https://lobbycanada.gc.ca/en/open-data/"
 LICENCE_URL = "https://lobbycanada.gc.ca/en/open-data/open-data-licence-agreement/"
 ATTRIBUTION = ("Contains information licensed under the Open Data Licence Agreement — "
@@ -605,6 +610,19 @@ def download(url: str, dest: str, progress=None, kind: str = "") -> dict:
     if got < 1000:
         raise RuntimeError(f"{url} returned an empty file")
     return {"url": url, "modified": resp.headers.get("Last-Modified", ""), "bytes": got}
+
+
+def download_any(kind: str, dest: str, progress=None) -> dict:
+    """Try the Commissioner's site, then the GitHub copy. Raises with every reason if both fail."""
+    official = REGISTRATIONS_URL if kind == "registrations" else COMMUNICATIONS_URL
+    urls = [official] + ([MIRROR_URL + ZIP_NAMES[kind]] if MIRROR_URL else [])
+    problems = []
+    for url in urls:
+        try:
+            return download(url, dest, progress, kind if url == official else "")
+        except RuntimeError as exc:
+            problems.append(str(exc))
+    raise RuntimeError(" Then: ".join(problems))
 
 
 def remote_modified(url: str) -> str | None:
@@ -1401,9 +1419,9 @@ def run_job(job: dict) -> dict:
             return cb
 
         say("Downloading registrations")
-        reg = download(job.get("reg_url") or REGISTRATIONS_URL, reg_zip, bytes_progress("Downloading registrations"), "registrations")
+        reg = download_any("registrations", reg_zip, bytes_progress("Downloading registrations"))
         say("Downloading communication reports")
-        comm = download(job.get("comm_url") or COMMUNICATIONS_URL, comm_zip, bytes_progress("Downloading communication reports"), "communications")
+        comm = download_any("communications", comm_zip, bytes_progress("Downloading communication reports"))
         stats = build_database(reg_zip, comm_zip, job["db"], job.get("members") or [], bills, progress=say,
                                meta={"reg_modified": reg["modified"], "comm_modified": comm["modified"],
                                      "reg_url": reg["url"], "comm_url": comm["url"]})
