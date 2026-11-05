@@ -1,4 +1,4 @@
-/** Tailwind settings for ParlTrack Canada. Colours come from CSS variables (see input.css) so dark mode can swap them. */
+/** Tailwind settings for PolitiKit. Colours come from CSS variables (see input.css) so dark mode can swap them. */
 const v = (n) => `rgb(var(--${n}) / <alpha-value>)`;
 
 module.exports = {

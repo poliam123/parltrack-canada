@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% from "_member.html" import member_card %}
 
-{% block title %}Members of Parliament | ParlTrack Canada{% endblock %}
+{% block title %}Members of Parliament | PolitiKit{% endblock %}
 
 {% block intro %}Every sitting MP in the House of Commons, grouped by party. Search by name or riding, or find your own MP by postal code.{% endblock %}
 
@@ -24,7 +24,7 @@
            class="min-w-0 flex-1 rounded-lg border-0 bg-ink-50 px-3 py-2.5 text-sm uppercase text-ink-900 ring-1 ring-inset ring-ink-200 placeholder:normal-case placeholder:text-ink-400 focus:outline-none focus:ring-2 focus:ring-maple-600">
     <button type="submit" class="rounded-lg bg-maple-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-maple-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink-800">Look up</button>
   </form>
-  <p class="mt-2 text-xs text-ink-500">Your postal code is sent to Open North's Represent service to find your riding. ParlTrack doesn't store it. A few postal codes sit on a riding boundary, so check the result.</p>
+  <p class="mt-2 text-xs text-ink-500">Your postal code is sent to Open North's Represent service to find your riding. PolitiKit doesn't store it. A few postal codes sit on a riding boundary, so check the result.</p>
 
   {% if lookup %}
   <div class="mt-4" aria-live="polite">

@@ -1,10 +1,10 @@
 {% extends "base.html" %}
 
-{% block title %}Proposed changes, {{ number }} | ParlTrack Canada{% endblock %}
+{% block title %}Proposed changes, {{ number }} | PolitiKit{% endblock %}
 
 {% block meta %}
   <meta property="og:type" content="article">
-  <meta property="og:site_name" content="ParlTrack Canada">
+  <meta property="og:site_name" content="PolitiKit">
   <meta property="og:title" content="{{ number }}: {{ short_title or title or 'Bill before Parliament' }}">
   <meta property="og:description" content="{{ share_text or 'What this bill would change, in plain reading order.' }}">
   <meta property="og:url" content="{{ request.url }}">

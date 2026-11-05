@@ -1,4 +1,4 @@
-/* ParlTrack Canada: site-wide behaviour. Loaded once and cached by the browser. */
+/* PolitiKit: site-wide behaviour. (Saved settings keep their old 'parltrack.' names so nothing is lost.) Loaded once and cached by the browser. */
 (function () {
   'use strict';
   var root = document.documentElement;

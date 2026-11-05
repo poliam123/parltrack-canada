@@ -1,4 +1,4 @@
-"""ParlTrack Canada: Canadian parliamentary bill tracker.
+"""PolitiKit (formerly ParlTrack Canada): Canadian federal politics in one place.
 
 Pages
   /                              the 20 most recently active bills still moving
@@ -1450,7 +1450,7 @@ GAZETTE_RSS = {
 }
 GAZETTE_YEAR_INDEX = "https://gazette.gc.ca/rp-pr/{part}/{year}/index-eng.html"
 GAZETTE_HOME = "https://gazette.gc.ca/accueil-home-eng.html"
-GAZETTE_UA = {"User-Agent": "legis-bill-tracker/1.0 (ParlTrack Canada)"}
+GAZETTE_UA = {"User-Agent": "PolitiKit/1.0 (https://politikit.ca)"}
 REG_TTL = 6 * 3600
 REG_RETRY_AFTER = 15 * 60
 REG_WORKERS = 4
@@ -2628,7 +2628,7 @@ def get_senators() -> dict:
         senators, error = [], None
         try:
             resp = requests.get(SENATE_LIST_URL, timeout=25,
-                                headers={"User-Agent": "ParlTrackCanada/1.0 (https://parltrack-canada.onrender.com)"})
+                                headers={"User-Agent": "PolitiKit/1.0 (https://politikit.ca)"})
             resp.raise_for_status()
             senators = parse_senators(resp.text)
         except requests.RequestException as exc:
@@ -3188,13 +3188,13 @@ def glossary():
 def export_active():
     records, _ = fetch_records()
     chamber, kind, sort, q = _active_filters()
-    return bills_csv(all_active_bills(records, chamber, kind, q, sort), "parltrack-active-bills.csv")
+    return bills_csv(all_active_bills(records, chamber, kind, q, sort), "politikit-active-bills.csv")
 
 
 @app.route("/export/passed.csv")
 def export_passed():
     records, _ = fetch_records()
-    return bills_csv(recent_passed_bills(records, limit=10**6)[0], "parltrack-passed-bills.csv")
+    return bills_csv(recent_passed_bills(records, limit=10**6)[0], "politikit-passed-bills.csv")
 
 
 @app.route("/export/following.csv")
@@ -3203,7 +3203,7 @@ def export_following():
               if BILL_NUMBER_RE.match(p.strip())]
     records, _ = fetch_records()
     bills = [b for b in (normalize(r) for r in records) if b and b["number"].upper() in wanted]
-    return bills_csv(bills, "parltrack-my-bills.csv")
+    return bills_csv(bills, "politikit-my-bills.csv")
 
 
 @app.route("/export/members.csv")
@@ -3213,7 +3213,7 @@ def export_members():
               "Constituency address", "Website"]
     rows = [[m["name"], m["party"], m["riding"], m["province"], m["email"], m["hill_tel"], m["const_tel"],
              " | ".join(m["const_addr"]), m["website"]] for m in members]
-    return csv_response("parltrack-members.csv", header, rows)
+    return csv_response("politikit-members.csv", header, rows)
 
 
 @app.route("/debug")

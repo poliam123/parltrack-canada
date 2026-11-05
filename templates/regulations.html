@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}Regulations | ParlTrack Canada{% endblock %}
+{% block title %}Regulations | PolitiKit{% endblock %}
 
 {% block intro %}Regulations set the detailed rules that put acts of Parliament into practice. The government publishes proposed regulations in the Canada Gazette so anyone can comment before they're final. Routine technical orders are left out.{% endblock %}
 
@@ -69,7 +69,7 @@
 {% if data is none %}
   {% if reg_status == 'error' %}
   <div role="alert" class="rounded-xl border-l-4 border-maple-600 bg-paper p-4 text-sm text-ink-800 shadow-sm ring-1 ring-ink-200">
-    The Canada Gazette couldn't be read just now, so there's nothing to show yet. ParlTrack will try again in a few minutes.
+    The Canada Gazette couldn't be read just now, so there's nothing to show yet. PolitiKit will try again in a few minutes.
     In the meantime, you can browse the <a class="font-semibold underline underline-offset-2" href="{{ gazette_home }}" target="_blank" rel="noopener">Canada Gazette</a> directly.
   </div>
   {% else %}

@@ -4,15 +4,15 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>{% block title %}ParlTrack Canada{% endblock %}</title>
-  <meta name="description" content="Track the bills moving through Canada's Parliament, and find your MP.">
+  <title>{% block title %}PolitiKit{% endblock %}</title>
+  <meta name="description" content="Canadian federal politics in one place: bills, MPs, committees, regulations and the federal budget.">
   {% block meta %}{% endblock %}
 
   <!-- Apply the saved (or system) colour theme before the page paints, so there is no flash. -->
   <script>
     (function () {
       try {
-        var t = localStorage.getItem('parltrack.theme');
+        var t = localStorage.getItem('parltrack.theme');  // storage keys keep the old name so saved settings survive the rename
         if (t === 'dark' || (!t && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
           document.documentElement.classList.add('dark');
         }
@@ -26,7 +26,7 @@
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="apple-mobile-web-app-title" content="ParlTrack">
+  <meta name="apple-mobile-web-app-title" content="PolitiKit">
   <link rel="icon" type="image/png" sizes="192x192" href="{{ url_for('static', filename='icons/icon-192.png') }}">
   <link rel="apple-touch-icon" href="{{ url_for('static', filename='icons/icon-180.png') }}">
 
@@ -46,8 +46,8 @@
     <div class="mx-auto {{ width }} px-4">
       <div id="brand-row" class="flex items-center gap-3 py-3">
         <a href="{{ url_for('index') }}" class="flex min-w-0 items-center gap-3 rounded-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white">
-          <span id="flag" class="block h-7 w-14 shrink-0 overflow-hidden rounded-[3px] shadow ring-1 ring-white/25">{% include "_flag.html" %}</span>
-          <h1 class="truncate font-serif text-xl font-semibold tracking-tight sm:text-2xl">ParlTrack Canada</h1>
+          <span id="logo" class="block h-9 w-9 shrink-0 overflow-hidden rounded-[8px] ring-1 ring-white/25">{% include "_logo.html" %}</span>
+          <h1 class="truncate font-serif text-xl font-semibold tracking-tight sm:text-2xl">PolitiKit</h1>
         </a>
         <a href="{{ url_for('search_page') }}" aria-label="Search" {% if request.endpoint == 'search_page' %}aria-current="page"{% endif %}
            class="ml-auto inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-white/80 hover:bg-white/10 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white">

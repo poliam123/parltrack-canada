@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}{% if q %}{{ q }} · {% endif %}Search | ParlTrack Canada{% endblock %}
+{% block title %}{% if q %}{{ q }} · {% endif %}Search | PolitiKit{% endblock %}
 
 {% block intro %}Search bills, MPs, senators, committees, regulations and the glossary. Try a bill number like C-15, a riding, a name or a topic.{% endblock %}
 
@@ -17,7 +17,7 @@
 
 {% block content %}
 <form method="get" action="{{ url_for('search_page') }}" role="search" class="mb-6 flex gap-2">
-  <label for="q" class="sr-only">Search ParlTrack</label>
+  <label for="q" class="sr-only">Search PolitiKit</label>
   <input id="q" name="q" type="search" value="{{ q }}" maxlength="100" placeholder="Search bills, MPs, committees…" {% if not q %}autofocus{% endif %}
          class="min-w-0 flex-1 rounded-lg border-0 bg-paper px-3 py-2.5 text-sm text-ink-900 ring-1 ring-inset ring-ink-200 placeholder:text-ink-400 focus:outline-none focus:ring-2 focus:ring-maple-600">
   <button type="submit" class="rounded-lg bg-maple-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-maple-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink-800">Search</button>
