@@ -15,6 +15,10 @@ Pages
   /stats                         charts: bill types, sponsors' parties, Parliament clock
   /stats/budget                  the most recent federal budget: spending, revenue, deficit, biggest changes
   /regulations                   proposed regulations open for comment and new final regulations (Canada Gazette)
+  /lobbying                      lobbying: latest meetings, who lobbies most, searchable (Commissioner of Lobbying)
+  /lobbying/org/<num>            one organization: registrations, lobbyists, bills named, every reported meeting
+  /lobbying/lobbyist/<num>       one registrant (consultant lobbyist or in-house responsible officer)
+  /members/<id>/lobbying         every reported meeting with one MP
   /summary/<session>/<number>    JSON: official 3-sentence summary of a bill
   /api/stats/parties             JSON: progress of the party-chart job
   /debug, /healthz               troubleshooting and hosting checks
@@ -44,8 +48,14 @@ from datetime import date, datetime, timedelta, timezone
 from html.parser import HTMLParser
 from urllib.parse import urljoin
 
+import subprocess
+import sys
+import tempfile
+
 import requests
 from flask import Flask, Response, abort, jsonify, render_template, request, url_for
+
+import lobbying
 
 LEGISINFO_URL = "https://www.parl.ca/legisinfo/en/bills/json"
 DOCUMENT_URL = "https://www.parl.ca/DocumentViewer/en/{session}/bill/{number}/{stage}"
@@ -1401,7 +1411,8 @@ def _matches(words: list[str], haystack: str) -> bool:
 def run_search(q: str) -> dict:
     q = (q or "").strip()[:100]
     words = [w for w in re.split(r"[\s,]+", _fold(q)) if w]
-    results = {"bills": [], "members": [], "senators": [], "committees": [], "regulations": [], "glossary": []}
+    results = {"bills": [], "members": [], "senators": [], "committees": [], "regulations": [],
+               "lobby_orgs": [], "lobbyists": [], "glossary": []}
     if not words:
         return results
 
@@ -1428,6 +1439,13 @@ def run_search(q: str) -> dict:
             regs = [(r, "Open for comment") for r in snap["data"]["proposed"]] + [(r, "Final") for r in snap["data"]["final"]]
             results["regulations"] = [{**r, "kind": k} for r, k in regs
                                       if _matches(words, _fold(f"{r['title']} {r['act']} {r['dept']} {r['number']}"))][:SEARCH_LIMIT]
+        conn = lobby_db()
+        if conn is not None:
+            try:
+                found = lobbying.search(conn, words, limit=SEARCH_LIMIT)
+                results["lobby_orgs"], results["lobbyists"] = found["orgs"], found["lobbyists"]
+            finally:
+                conn.close()
         results["glossary"] = [{"term": t, "text": x, "slug": _slug(t)} for t, x in GLOSSARY
                                if _matches(words, _fold(f"{t} {x}"))][:10]
     return results
@@ -2652,11 +2670,231 @@ def senate_groups(senators: list[dict]) -> list[dict]:
             for g in order]
 
 
+# --------------------------------------------------------------------------
+# Lobbying: registrations and monthly communication reports from the Commissioner of Lobbying
+#
+# The parsing lives in lobbying.py. Here the site decides when to rebuild the lobbying database
+# and starts the build as a separate process, so its memory and CPU stay out of the web server.
+# The Commissioner publishes new files weekly; the site checks twice a day whether they changed.
+# --------------------------------------------------------------------------
+APP_DIR = os.path.dirname(os.path.abspath(__file__))
+LOBBY_CHECK_EVERY = 12 * 3600       # look for new files this often
+LOBBY_MAX_AGE = 8 * 24 * 3600       # rebuild after this long even if the server won't say what changed
+LOBBY_RETRY_AFTER = 30 * 60         # wait this long after a failed build
+LOBBY_INCOMPLETE_RETRY = 6 * 3600   # rebuild sooner if the MP list or a session's bills were missing
+LOBBY_BUILD_TIMEOUT = 40 * 60
+LOBBY_PAGE = lobbying.PAGE_SIZE
+SESSION_BILLS_TTL = 24 * 3600
+
+_lobby: dict = {"running": False, "checked": 0.0, "error": None, "incomplete": False}
+_lobby_lock = threading.Lock()
+_lobby_cache: dict = {"key": None, "overview": None}
+_session_bills: dict = {}
+
+
+def _session_records(session: str) -> list[dict]:
+    """Raw LEGISinfo records for another session (the main feed only has the current one)."""
+    hit = _session_bills.get(session)
+    if hit and time.time() < hit[0]:
+        return hit[1]
+    try:
+        resp = requests.get(LEGISINFO_URL, params={"parlsession": session}, timeout=30,
+                            headers={"Accept": "application/json", "User-Agent": "PolitiKit/1.0 (+https://politikit.ca)"})
+        resp.raise_for_status()
+        records = _extract_records(json.loads(resp.content.decode("utf-8-sig")))
+    except (requests.RequestException, ValueError):
+        records = []
+    if records:
+        _session_bills[session] = (time.time() + SESSION_BILLS_TTL, records)
+    return records
+
+
+def bills_for_lobbying(records: list[dict]) -> list[dict]:
+    """Every bill of the sessions the lobbying data covers, with English and French titles,
+    so mentions like 'Bill C-27' can be matched to the right session's bill."""
+    by_session = {CURRENT_SESSION: records}
+    for code, _, _ in lobbying.SESSIONS:
+        if code not in by_session or not by_session[code]:
+            by_session[code] = _session_records(code)
+    out = []
+    for recs in by_session.values():
+        for rec in recs:
+            b = normalize(rec)
+            if not b or not b["number_ok"] or b["pro_forma"]:
+                continue
+            out.append({"session": b["session"], "number": b["number"].upper(),
+                        "short_title": b["short_title"], "title": b["title"],
+                        "short_title_fr": pick(rec, ("ShortTitleFr",)), "title_fr": pick(rec, ("LongTitleFr",)),
+                        "introduced": b["introduced"].date().isoformat() if b["introduced"] else ""})
+    return out
+
+
+def _meta_incomplete(meta: dict) -> bool:
+    return meta.get("mps_known") in (None, "0") or meta.get("bills_complete") == "0"
+
+
+def _lobby_needs_build(meta: dict) -> bool:
+    if not meta or meta.get("schema") != lobbying.SCHEMA_VERSION:
+        return True
+    try:
+        age = time.time() - datetime.fromisoformat(meta.get("built", "")).timestamp()
+    except ValueError:
+        return True
+    # Built while the MP list or a session's bills couldn't be fetched: try again sooner than usual.
+    if _meta_incomplete(meta) and age > LOBBY_INCOMPLETE_RETRY:
+        return True
+    if age < LOBBY_CHECK_EVERY:
+        return False
+    unknown = False
+    for url, key in ((meta.get("reg_url") or lobbying.REGISTRATIONS_URL, "reg_modified"),
+                     (meta.get("comm_url") or lobbying.COMMUNICATIONS_URL, "comm_modified")):
+        remote = lobbying.remote_modified(url)
+        if remote is None:
+            unknown = True
+        elif remote != meta.get(key):
+            return True
+    return unknown and age > LOBBY_MAX_AGE
+
+
+def ensure_lobby_job() -> None:
+    """Start a check (and, if needed, a rebuild) in the background when one is due."""
+    now = time.time()
+    with _lobby_lock:
+        if _lobby["running"]:
+            return
+        wait = (LOBBY_RETRY_AFTER if _lobby["error"]
+                else LOBBY_INCOMPLETE_RETRY if _lobby["incomplete"] else LOBBY_CHECK_EVERY)
+        if _lobby["checked"] and now - _lobby["checked"] < wait:
+            return
+        _lobby.update(running=True, checked=now)
+    threading.Thread(target=_run_lobby_job, daemon=True).start()
+
+
+def _run_lobby_job() -> None:
+    error, job_path = None, None
+    try:
+        meta = lobbying.read_meta()
+        if not _lobby_needs_build(meta):
+            return
+        lobbying.write_progress(lobbying.PROGRESS_PATH, status="running", label="Starting", pct=0.0, error=None)
+        members = get_directory()["members"]
+        records, _ = fetch_records()
+        job = {"db": lobbying.DB_PATH, "progress": lobbying.PROGRESS_PATH,
+               "members": [{"id": m["id"], "first": m["first"], "last": m["last"]} for m in members],
+               "bills": bills_for_lobbying(records),
+               "reg_url": meta.get("reg_url") or lobbying.REGISTRATIONS_URL,
+               "comm_url": meta.get("comm_url") or lobbying.COMMUNICATIONS_URL}
+        fd, job_path = tempfile.mkstemp(prefix="politikit-lobby-job-", suffix=".json")
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(job, f)
+        proc = subprocess.run([sys.executable, os.path.join(APP_DIR, "lobbying.py"), "build", job_path],
+                              cwd=APP_DIR, capture_output=True, text=True, timeout=LOBBY_BUILD_TIMEOUT)
+        if proc.returncode != 0:
+            error = lobbying.read_progress().get("error") or (proc.stderr or "The build stopped.")[-600:]
+    except subprocess.TimeoutExpired:
+        error = "The lobbying build took too long and was stopped."
+    except Exception as exc:  # the site must keep working whatever happens here
+        error = f"{type(exc).__name__}: {exc}"
+    finally:
+        if job_path:
+            try:
+                os.remove(job_path)
+            except OSError:
+                pass
+        if error:
+            lobbying.write_progress(lobbying.PROGRESS_PATH, status="error", label="Stopped", pct=0.0, error=error)
+        incomplete = _meta_incomplete(lobbying.read_meta()) if not error else False
+        with _lobby_lock:
+            _lobby.update(running=False, error=error, incomplete=incomplete)
+        _lobby_cache.update(key=None, overview=None)
+
+
+def lobby_db():
+    """An open, read-only connection to the lobbying database, or None while it's being built."""
+    conn = lobbying.connect()
+    if conn is None:
+        return None
+    try:
+        meta = dict(conn.execute("SELECT key, value FROM meta"))
+    except Exception:
+        conn.close()
+        return None
+    if meta.get("schema") != lobbying.SCHEMA_VERSION:
+        conn.close()
+        return None
+    conn.meta = meta
+    return conn
+
+
+def lobby_status() -> dict:
+    p = lobbying.read_progress()
+    with _lobby_lock:
+        running, error = _lobby["running"], _lobby["error"]
+    status = "running" if running else ("error" if error else "idle")
+    return {"status": status, "label": p.get("label") or "Starting", "pct": round(float(p.get("pct") or 0) * 100),
+            "error": error or (p.get("error") if p.get("status") == "error" else None)}
+
+
+def lobby_overview(conn) -> dict:
+    key = conn.meta.get("built")
+    if _lobby_cache["key"] != key or _lobby_cache["overview"] is None:
+        _lobby_cache.update(key=key, overview=lobbying.overview(conn))
+    return _lobby_cache["overview"]
+
+
+def lobby_meta_view(meta: dict) -> dict:
+    """Dates for the 'last updated' notes."""
+    def http_date(text):
+        try:
+            return datetime.strptime(text, "%a, %d %b %Y %H:%M:%S GMT").date()
+        except (TypeError, ValueError):
+            return None
+    built = None
+    try:
+        built = datetime.fromisoformat(meta.get("built", ""))
+    except ValueError:
+        pass
+    return {"published": http_date(meta.get("comm_modified")), "built": built,
+            "since": date.fromisoformat(meta["since"]) if meta.get("since") else lobbying.LOBBY_SINCE}
+
+
+@app.template_filter("day")
+def day_filter(value) -> str:
+    """'2026-10-13' -> 'Oct 13, 2026' (anything else is shown as is)."""
+    try:
+        return date.fromisoformat(str(value)[:10]).strftime("%b %-d, %Y")
+    except (TypeError, ValueError):
+        return value or ""
+
+
+def mp_lookup() -> dict[int, dict]:
+    return {m["id"]: m for m in get_directory()["members"]}
+
+
+def _page_arg() -> int:
+    return _int_arg("page", 1, 1, 400)
+
+
+def _page_urls(endpoint: str, page: int, more: bool, **params) -> dict:
+    keep = {k: v for k, v in params.items() if v}
+    return {"prev": url_for(endpoint, page=page - 1, **keep) if page > 1 else None,
+            "next": url_for(endpoint, page=page + 1, **keep) if more else None, "page": page}
+
+
+def lobby_page_context(conn) -> dict:
+    return {"active_tab": "lobbying", "lobby_meta": lobby_meta_view(conn.meta if conn else {}),
+            "lobby_status": None if conn else lobby_status(), "mps": mp_lookup(),
+            "party_colours": PARTY_COLOURS, "attribution": lobbying.ATTRIBUTION,
+            "licence_url": lobbying.LICENCE_URL, "open_data_url": lobbying.OPEN_DATA_PAGE,
+            "current_session": CURRENT_SESSION, "fetched_at": None, "total": 0}
+
+
 def warm_up() -> None:
     """Load the slow data in the background right after the server starts."""
     try:
         fetch_records()
         get_directory()
+        ensure_lobby_job()
     except Exception:
         pass
 
@@ -2834,9 +3072,23 @@ def bill_detail(parl_session: str, number: str):
     if info and info["sponsor_name"]:
         sponsor = {"name": info["sponsor_name"], "title": info["sponsor_title"], "riding": info["sponsor_riding"]}
 
+    lobby = None
+    if any(code == parl_session for code, _, _ in lobbying.SESSIONS):
+        ensure_lobby_job()
+        conn = lobby_db()
+        if conn is not None:
+            try:
+                lobby = lobbying.bill_lobbying(conn, parl_session, number)
+            finally:
+                conn.close()
+            by_id = mp_lookup()
+            lobby["mps"] = [{**by_id[m["id"]], "n": m["n"]} for m in lobby["mps"] if m["id"] in by_id]
+
     return render_template(
         "bill.html",
         active_tab=None,
+        lobby=lobby,
+        party_colours=PARTY_COLOURS,
         number=number,
         bill=bill,
         title=(bill and bill["title"]) or (info and info["long_title"]) or "",
@@ -2960,6 +3212,131 @@ def regulations_status_api():
     return response
 
 
+@app.route("/lobbying")
+def lobbying_page():
+    ensure_lobby_job()
+    conn = lobby_db()
+    ctx = lobby_page_context(conn)
+    q = request.args.get("q", "").strip()[:80]
+    subject = request.args.get("subject", "")
+    who = request.args.get("who", "")
+    who = who if who == "mps" else ""
+    page = _page_arg()
+    if conn is None:
+        return render_template("lobbying.html", q=q, subject="", who="", **ctx)
+    try:
+        subjects = lobbying.subjects_in_use(conn)
+        if subject not in {s["code"] for s in subjects}:
+            subject = ""
+        found = lobbying.search(conn, [w for w in re.split(r"[\s,]+", _fold(q)) if w]) if q else None
+        reports, more = lobbying.latest_reports(conn, subject=subject, mps_only=bool(who),
+                                                limit=LOBBY_PAGE, offset=(page - 1) * LOBBY_PAGE)
+        return render_template("lobbying.html", q=q, subject=subject, who=who, subjects=subjects, found=found,
+                               ov=lobby_overview(conn), reports=reports,
+                               pages=_page_urls("lobbying_page", page, more, subject=subject, who=who), **ctx)
+    finally:
+        conn.close()
+
+
+@app.route("/lobbying/org/<int:num>")
+def lobbying_org_page(num: int):
+    ensure_lobby_job()
+    conn = lobby_db()
+    ctx = lobby_page_context(conn)
+    if conn is None:
+        return render_template("lobbying_org.html", org=None, **ctx)
+    try:
+        org = lobbying.org_profile(conn, num)
+        if org is None:
+            abort(404)
+        page = _page_arg()
+        reports, more = lobbying.reports_for(conn, "client_num", num, LOBBY_PAGE, (page - 1) * LOBBY_PAGE)
+        return render_template("lobbying_org.html", org=org, reports=reports,
+                               pages=_page_urls("lobbying_org_page", page, more, num=num),
+                               export_url=url_for("export_lobbying_org", num=num), **ctx)
+    finally:
+        conn.close()
+
+
+@app.route("/lobbying/lobbyist/<int:num>")
+def lobbying_lobbyist_page(num: int):
+    ensure_lobby_job()
+    conn = lobby_db()
+    ctx = lobby_page_context(conn)
+    if conn is None:
+        return render_template("lobbying_lobbyist.html", person=None, **ctx)
+    try:
+        person = lobbying.registrant_profile(conn, num)
+        if person is None:
+            abort(404)
+        page = _page_arg()
+        reports, more = lobbying.reports_for(conn, "registrant_num", num, LOBBY_PAGE, (page - 1) * LOBBY_PAGE)
+        return render_template("lobbying_lobbyist.html", person=person, reports=reports,
+                               pages=_page_urls("lobbying_lobbyist_page", page, more, num=num), **ctx)
+    finally:
+        conn.close()
+
+
+@app.route("/members/<int:pid>/lobbying")
+def member_lobbying_page(pid: int):
+    ensure_lobby_job()
+    member = mp_lookup().get(pid)
+    if member is None:
+        abort(404)
+    conn = lobby_db()
+    ctx = lobby_page_context(conn)
+    ctx.update(active_tab="members", section="house", m=member,
+               colour=PARTY_COLOURS.get(member["party"], OTHER_COLOUR))
+    if conn is None:
+        return render_template("lobbying_mp.html", summary=None, **ctx)
+    try:
+        page = _page_arg()
+        reports, more = lobbying.mp_reports(conn, pid, LOBBY_PAGE, (page - 1) * LOBBY_PAGE)
+        return render_template("lobbying_mp.html", summary=lobbying.mp_summary(conn, pid, limit=12), reports=reports,
+                               pages=_page_urls("member_lobbying_page", page, more, pid=pid), **ctx)
+    finally:
+        conn.close()
+
+
+@app.route("/api/lobbying/status")
+def lobbying_status_api():
+    """Polled by the lobbying pages while the database is being built."""
+    ensure_lobby_job()
+    meta = lobbying.read_meta()
+    status = lobby_status()
+    response = jsonify(ready=meta.get("schema") == lobbying.SCHEMA_VERSION and status["status"] != "running",
+                       built=meta.get("built"), published=meta.get("comm_modified"), **status,
+                       counts={k: meta.get(k) for k in ("reports", "registrations", "active_registrations",
+                                                        "mp_links", "bill_mentions", "organizations")})
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.route("/export/lobbying/org/<int:num>.csv")
+def export_lobbying_org(num: int):
+    conn = lobby_db()
+    if conn is None:
+        abort(503)
+    try:
+        org = conn.execute("SELECT name FROM org WHERE num = ?", (num,)).fetchone()
+        if org is None:
+            abort(404)
+        reports, _ = lobbying.reports_for(conn, "client_num", num, limit=5000)
+    finally:
+        conn.close()
+    header = ["Date", "Organization", "Lobbyist", "Lobbyist type", "Officials met", "MPs met", "Subjects",
+              "Bills named", "Description", "Official report"]
+    rows = []
+    for r in reports:
+        rows.append([r["comm_date"], r["client"], r["registrant"], r["kind"],
+                     "; ".join(f"{o['name']} ({o['title']}, {o['institution']})" for o in r["officials"]),
+                     "; ".join(o["name"] for o in r["officials"] if o["mp_id"]),
+                     "; ".join(r["subjects"]), "; ".join(f"{n} ({s})" for s, n in r["bills"]),
+                     " | ".join(r["details"]), r["url"]])
+    slug = _slug(org["name"])[:60] or str(num)
+    return csv_response(f"politikit-lobbying-{slug}.csv", header, rows)
+
+
 @app.route("/members/<int:pid>")
 def member_page(pid: int):
     directory = get_directory()
@@ -2971,10 +3348,19 @@ def member_page(pid: int):
     if show not in ("all", "bills"):
         show = "all"
     shown = [v for v in votes if v["bill"]] if show == "bills" else votes
+    ensure_lobby_job()
+    lobby = None
+    conn = lobby_db()
+    if conn is not None:
+        try:
+            lobby = lobbying.mp_summary(conn, pid, limit=5)
+        finally:
+            conn.close()
     return render_template(
         "member.html",
         active_tab="members",
         section="house",
+        lobby=lobby,
         m=member,
         colour=PARTY_COLOURS.get(member["party"], OTHER_COLOUR),
         votes=shown[:200],

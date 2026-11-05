@@ -1,0 +1,142 @@
+{# Shared pieces for the lobbying pages. #}
+
+{% macro official_line(o, mps, party_colours) %}
+  {% set mp = mps.get(o.mp_id) if o.mp_id else none %}
+  {% if mp %}
+  <li class="flex min-w-0 items-baseline gap-1.5">
+    <span class="swatch relative top-[-1px] h-2 w-2 shrink-0 rounded-full" style="background: {{ party_colours.get(mp.party, '#d6d7da') }}" aria-hidden="true"></span>
+    <span class="min-w-0"><a href="{{ url_for('member_page', pid=mp.id) }}" class="font-semibold text-ink-900 underline decoration-ink-400 underline-offset-2 hover:text-maple-700">{{ mp.name }}</a><span class="text-ink-500"> · {{ o.title or 'Member of Parliament' }}{% if o.institution and 'house of commons' not in o.institution|lower %}, {{ o.institution }}{% endif %}</span></span>
+  </li>
+  {% else %}
+  <li class="min-w-0 text-ink-800">{{ o.name }}<span class="text-ink-500">{% if o.title %} · {{ o.title }}{% endif %}{% if o.institution %}, {{ o.institution }}{% endif %}</span></li>
+  {% endif %}
+{% endmacro %}
+
+{% macro report_list(reports, mps, party_colours, show_org=true, show_registrant=true, current_session='45-1') %}
+<ul class="divide-y divide-ink-100">
+  {% for r in reports %}
+  <li class="py-4 first:pt-1">
+    <div class="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+      <time datetime="{{ r.comm_date }}" class="text-xs font-semibold uppercase tracking-wide text-ink-500 tabular-nums">{{ r.date.strftime('%b %-d, %Y') if r.date else r.comm_date }}</time>
+      {% if show_org %}<a href="{{ url_for('lobbying_org_page', num=r.client_num) }}" class="font-serif text-[1.0625rem] font-semibold leading-snug text-ink-900 hover:text-maple-700">{{ r.client }}</a>{% endif %}
+    </div>
+    {% if show_registrant and r.registrant %}
+    <p class="mt-0.5 text-xs text-ink-500">Reported by <a href="{{ url_for('lobbying_lobbyist_page', num=r.registrant_num) }}" class="font-medium text-ink-700 underline decoration-ink-400 underline-offset-2 hover:text-maple-700">{{ r.registrant }}</a>{% if r.kind %} · {{ r.kind }}{% endif %}</p>
+    {% endif %}
+
+    {% set shown = r.officials[:4] %}
+    <ul class="mt-2 space-y-1 text-sm" aria-label="Officials met">
+      {% for o in shown %}{{ official_line(o, mps, party_colours) }}{% endfor %}
+    </ul>
+    {% if r.officials|length > 4 %}
+    <details class="group mt-1 text-sm">
+      <summary class="cursor-pointer list-none text-xs font-semibold text-maple-700 hover:text-maple-600 [&::-webkit-details-marker]:hidden">
+        <span class="group-open:hidden">and {{ r.officials|length - 4 }} more</span><span class="hidden group-open:inline">Show fewer</span>
+      </summary>
+      <ul class="mt-1 space-y-1">{% for o in r.officials[4:] %}{{ official_line(o, mps, party_colours) }}{% endfor %}</ul>
+    </details>
+    {% endif %}
+
+    {% if r.subjects or r.bills %}
+    <p class="mt-2 flex flex-wrap gap-1.5">
+      {% for s, n in r.bills %}
+      <a href="{{ url_for('bill_detail', parl_session=s, number=n) }}" class="inline-flex items-center rounded-md bg-night px-1.5 py-0.5 text-[0.6875rem] font-bold tracking-wide text-white hover:opacity-90" title="Bill {{ n }} ({{ s }})">{{ n }}{% if s != current_session %}<span class="ml-1 font-medium text-white/60">{{ s }}</span>{% endif %}</a>
+      {% endfor %}
+      {% for s in r.subjects %}<span class="inline-flex items-center rounded-full bg-ink-100 px-2 py-0.5 text-[0.6875rem] font-medium text-ink-700">{{ s }}</span>{% endfor %}
+    </p>
+    {% endif %}
+
+    {% if r.details %}
+    <details class="group mt-2">
+      <summary class="cursor-pointer list-none [&::-webkit-details-marker]:hidden">
+        <span class="block text-sm leading-relaxed text-ink-700 line-clamp-2 group-open:line-clamp-none">{{ r.details[0] }}</span>
+        {% if r.details[0]|length > 160 or r.details|length > 1 %}<span class="text-xs font-semibold text-maple-700 group-open:hidden">Read more</span>{% endif %}
+      </summary>
+      {% for d in r.details[1:] %}<p class="mt-2 text-sm leading-relaxed text-ink-700">{{ d }}</p>{% endfor %}
+    </details>
+    {% endif %}
+    <p class="mt-2 text-xs"><a href="{{ r.url }}" target="_blank" rel="noopener" class="text-ink-500 underline decoration-ink-400 underline-offset-2 hover:text-ink-900">Official report</a></p>
+  </li>
+  {% endfor %}
+</ul>
+{% endmacro %}
+
+{% macro pager(pages) %}
+{% if pages and (pages.prev or pages.next) %}
+<nav aria-label="Pages" class="mt-4 flex items-center justify-between gap-3 border-t border-ink-100 pt-4 text-sm">
+  {% if pages.prev %}<a href="{{ pages.prev }}" class="rounded-lg px-3 py-2 font-semibold text-ink-800 ring-1 ring-ink-200 hover:bg-ink-50">&larr; Newer</a>{% else %}<span></span>{% endif %}
+  <span class="text-xs text-ink-500">Page {{ pages.page }}</span>
+  {% if pages.next %}<a href="{{ pages.next }}" class="rounded-lg bg-night px-3 py-2 font-semibold text-white ring-1 ring-white/10 hover:opacity-90">Older &rarr;</a>{% else %}<span></span>{% endif %}
+</nav>
+{% endif %}
+{% endmacro %}
+
+{% macro monthly_chart(monthly, label) %}
+{% set total = monthly|sum(attribute='n') %}
+<figure class="mt-4">
+  <div class="flex h-20 items-end gap-[3px]" role="img" aria-label="{{ label }}: {{ total }} reports in the last {{ monthly|length }} months">
+    {% for m in monthly %}
+    <div class="group relative flex h-full flex-1 items-end">
+      <div class="w-full rounded-t-[3px] {{ 'bg-maple-600' if loop.last else 'bg-ink-600' }} {{ 'opacity-25' if not m.n }}" style="height: {{ m.height if m.n else 3 }}%"></div>
+      <span class="pointer-events-none absolute bottom-full left-1/2 z-10 mb-1 hidden -translate-x-1/2 whitespace-nowrap rounded bg-night px-1.5 py-0.5 text-[0.6875rem] font-semibold text-white group-hover:block">{{ m.month.strftime('%b %Y') }}: {{ m.n }}</span>
+    </div>
+    {% endfor %}
+  </div>
+  <figcaption class="mt-1.5 flex justify-between text-[0.6875rem] text-ink-500" aria-hidden="true">
+    <span>{{ monthly[0].month.strftime('%b %Y') }}</span><span>Reports per month</span><span>{{ monthly[-1].month.strftime('%b %Y') }}</span>
+  </figcaption>
+</figure>
+{% endmacro %}
+
+{% macro pending(status) %}
+{% if status and status.status == 'error' %}
+<div role="alert" class="rounded-2xl border-l-4 border-maple-600 bg-paper p-5 text-sm text-ink-800 shadow-sm ring-1 ring-ink-200">
+  <p class="font-semibold text-ink-900">The lobbying registry couldn't be loaded just now.</p>
+  <p class="mt-1 text-ink-700">PolitiKit will try again in about half an hour. In the meantime you can search the
+    <a class="font-semibold underline underline-offset-2" href="https://lobbycanada.gc.ca/app/secure/ocl/lrs/do/advSrch" target="_blank" rel="noopener">official Registry of Lobbyists</a>.</p>
+  {% if status.error %}<p class="mt-2 break-words text-xs text-ink-500">Details: {{ status.error }}</p>{% endif %}
+</div>
+{% else %}
+<div id="lobby-pending" data-url="{{ url_for('lobbying_status_api') }}" class="rounded-2xl bg-paper p-5 shadow-sm ring-1 ring-ink-200" role="status">
+  <p class="font-semibold text-ink-900">Loading the Registry of Lobbyists…</p>
+  <p class="mt-1 text-sm text-ink-600">PolitiKit is reading every registration and monthly communication report since November 2021. This takes a few minutes after an update, and the page will refresh by itself.</p>
+  <div class="mt-4 h-2.5 overflow-hidden rounded-full bg-ink-200" aria-hidden="true">
+    <div id="lobby-bar" class="h-full rounded-full bg-maple-600 transition-all" style="width: {{ [status.pct if status else 0, 4]|max }}%"></div>
+  </div>
+  <p id="lobby-step" class="mt-1.5 text-xs text-ink-500">{{ status.label if status else 'Starting' }}</p>
+</div>
+{% endif %}
+{% endmacro %}
+
+{% macro source_note(meta, attribution, licence_url, open_data_url) %}
+<p class="mt-6 text-xs leading-relaxed text-ink-500">
+  From the <a class="underline decoration-ink-400 underline-offset-2 hover:text-ink-900" href="{{ open_data_url }}" target="_blank" rel="noopener">Office of the Commissioner of Lobbying's open data</a>{% if meta.published %}, published {{ meta.published.strftime('%B %-d, %Y') }}{% endif %}.
+  Reports cover oral, arranged meetings with designated public office holders since {{ meta.since.strftime('%B %-d, %Y') }}; lobbyists file them by the 15th of the following month.
+  Names of MPs are matched to the current House of Commons, and bills are linked when the lobbyist's own description makes clear which bill it means.
+  {{ attribution }} <a class="underline decoration-ink-400 underline-offset-2 hover:text-ink-900" href="{{ licence_url }}" target="_blank" rel="noopener">Licence</a>.
+  PolitiKit is independent and is not endorsed by the Commissioner of Lobbying.
+</p>
+{% endmacro %}
+
+{% macro bar_list(items, title, empty, link=none) %}
+<section class="rise min-w-0 rounded-2xl bg-paper p-5 shadow-sm ring-1 ring-ink-200" aria-label="{{ title }}">
+  <h3 class="font-serif text-base font-semibold text-ink-900">{{ title }}</h3>
+  {% if items %}
+  <ol class="mt-3 space-y-2.5">{{ caller() }}</ol>
+  {% else %}
+  <p class="mt-2 text-sm text-ink-500">{{ empty }}</p>
+  {% endif %}
+</section>
+{% endmacro %}
+
+{% macro bar(label_html, n, width, unit='') %}
+<li>
+  <div class="flex items-baseline justify-between gap-3 text-sm">
+    <span class="min-w-0 truncate text-ink-800">{{ label_html }}</span>
+    <span class="shrink-0 tabular-nums font-semibold text-ink-900">{{ n }}{% if unit %}<span class="font-normal text-ink-500"> {{ unit[:-1] if n == 1 and unit.endswith('s') else unit }}</span>{% endif %}</span>
+  </div>
+  <div class="mt-1 h-1.5 overflow-hidden rounded-full bg-ink-100" aria-hidden="true">
+    <div class="grow h-full rounded-full bg-ink-600" style="width: {{ width }}%"></div>
+  </div>
+</li>
+{% endmacro %}

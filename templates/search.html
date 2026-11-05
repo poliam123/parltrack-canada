@@ -2,7 +2,7 @@
 
 {% block title %}{% if q %}{{ q }} · {% endif %}Search | PolitiKit{% endblock %}
 
-{% block intro %}Search bills, MPs, senators, committees, regulations and the glossary. Try a bill number like C-15, a riding, a name or a topic.{% endblock %}
+{% block intro %}Search bills, MPs, senators, committees, regulations, lobbying organizations and lobbyists, and the glossary. Try a bill number like C-15, a riding, a name or a topic.{% endblock %}
 
 {% macro group(title, count) %}
 <section class="rise mb-6" aria-label="{{ title }}">
@@ -83,6 +83,28 @@
     <li class="p-3 sm:px-4">
       <a href="{{ r.url }}" target="_blank" rel="noopener" class="font-semibold text-ink-900 hover:text-maple-700">{{ r.title }}</a>
       <p class="text-xs text-ink-500">{{ r.kind }}{% if r.number %} · {{ r.number }}{% endif %}{% if r.act %} · under the {{ r.act }}{% endif %}</p>
+    </li>
+    {% endfor %}
+  {% endcall %}
+  {% endif %}
+
+  {% if results.lobby_orgs %}
+  {% call group('Lobbying organizations', results.lobby_orgs|length) %}
+    {% for o in results.lobby_orgs %}
+    <li class="p-3 sm:px-4">
+      <a href="{{ url_for('lobbying_org_page', num=o.num) }}" class="font-semibold text-ink-900 hover:text-maple-700">{{ o.name }}</a>
+      <p class="text-xs text-ink-500">{{ o.kind_label }} · {{ o.reports_now }} meeting{{ '' if o.reports_now == 1 else 's' }} this Parliament{% if o.active_regs %} · registered now{% endif %}</p>
+    </li>
+    {% endfor %}
+  {% endcall %}
+  {% endif %}
+
+  {% if results.lobbyists %}
+  {% call group('Lobbyists', results.lobbyists|length) %}
+    {% for p in results.lobbyists %}
+    <li class="p-3 sm:px-4">
+      <a href="{{ url_for('lobbying_lobbyist_page', num=p.num) }}" class="font-semibold text-ink-900 hover:text-maple-700">{{ p.name }}</a>
+      <p class="text-xs text-ink-500">{{ p.kind_label }}{% if p.firm %} · {{ p.firm }}{% endif %}</p>
     </li>
     {% endfor %}
   {% endcall %}

@@ -327,4 +327,22 @@
     };
     setTimeout(rpoll, 1500);
   }
+
+  /* ---- Lobbying pages: poll while the registry is being loaded, then reload once ---- */
+  var lobbyPending = $('#lobby-pending');
+  if (lobbyPending) {
+    var lbar = $('#lobby-bar'), lstep = $('#lobby-step'), ltries = 0;
+    var lpoll = function () {
+      ltries++;
+      getJson(lobbyPending.getAttribute('data-url'))
+        .then(function (d) {
+          if (d.ready || d.status === 'error') { location.reload(); return; }
+          if (d.pct) { lbar.style.width = Math.max(4, d.pct) + '%'; }
+          if (d.label) { lstep.textContent = d.label + (d.pct ? ' (' + d.pct + '%)' : ''); }
+          if (ltries < 200) { setTimeout(lpoll, 4000); }
+        })
+        .catch(function () { if (ltries < 200) { setTimeout(lpoll, 6000); } });
+    };
+    setTimeout(lpoll, 2000);
+  }
 })();

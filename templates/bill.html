@@ -165,6 +165,35 @@
 </section>
 {% endif %}
 
+{% if lobby and lobby.orgs %}
+<section class="rise mt-4 rounded-2xl bg-paper p-5 shadow-[0_1px_2px_rgb(0_0_0/0.04)] ring-1 ring-ink-200 sm:p-7" style="--i: 4" aria-labelledby="lobby-h">
+  <h2 id="lobby-h" class="font-serif text-lg font-semibold text-ink-900">Who's lobbying on it</h2>
+  <p class="mt-1 text-sm text-ink-500">
+    {{ lobby.orgs|length }} organization{{ '' if lobby.orgs|length == 1 else 's' }} named this bill in their lobbying registration or in
+    {{ lobby.reports }} reported meeting{{ '' if lobby.reports == 1 else 's' }}. Their own words are quoted.
+  </p>
+  <ul class="mt-4 divide-y divide-ink-100">
+    {% for o in lobby.orgs[:15] %}
+    <li class="py-3">
+      <p class="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+        <a href="{{ url_for('lobbying_org_page', num=o.num) }}" class="text-[0.9375rem] font-semibold text-ink-900 underline decoration-maple-600/50 underline-offset-2 hover:text-maple-700">{{ o.name }}</a>
+        <span class="text-xs text-ink-500">{% if o.reports %}{{ o.reports }} meeting{{ '' if o.reports == 1 else 's' }}{% endif %}{% if o.reports and o.registered %} · {% endif %}{% if o.registered_now %}registered to lobby on it{% elif o.registered %}was registered on it{% endif %}{% if o.last %} · latest {{ o.last|day }}{% endif %}</span>
+      </p>
+      {% if o.snippet %}<p class="mt-1 text-sm italic leading-relaxed text-ink-600">“{{ o.snippet }}”</p>{% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+  {% if lobby.orgs|length > 15 %}<p class="mt-2 text-xs text-ink-500">And {{ lobby.orgs|length - 15 }} more. Search an organization on the <a class="underline decoration-ink-400 underline-offset-2" href="{{ url_for('lobbying_page') }}">Lobbying</a> page.</p>{% endif %}
+  {% if lobby.mps %}
+  <h3 class="mt-4 text-xs font-bold uppercase tracking-[0.18em] text-ink-500">MPs lobbied about it</h3>
+  <p class="mt-2 flex flex-wrap gap-1.5">
+    {% for mp in lobby.mps %}<a href="{{ url_for('member_lobbying_page', pid=mp.id) }}" class="inline-flex items-center gap-1.5 rounded-full bg-ink-100 px-2.5 py-1 text-xs font-medium text-ink-800 hover:bg-ink-200"><span class="swatch h-2 w-2 rounded-full" style="background: {{ party_colours.get(mp.party, '#d6d7da') }}" aria-hidden="true"></span>{{ mp.name }} <span class="text-ink-500">{{ mp.n }}</span></a>{% endfor %}
+  </p>
+  {% endif %}
+  <p class="mt-4 text-xs text-ink-500">From the Commissioner of Lobbying. A bill is listed when the lobbyist's description makes clear it means this bill, not one with the same number from another Parliament.</p>
+</section>
+{% endif %}
+
 <section class="rise mt-4 rounded-2xl bg-paper p-5 shadow-[0_1px_2px_rgb(0_0_0/0.04)] ring-1 ring-ink-200 sm:p-7" style="--i: 4" aria-labelledby="debate-h">
   <h2 id="debate-h" class="font-serif text-lg font-semibold text-ink-900">What MPs said</h2>
   {% if debates %}

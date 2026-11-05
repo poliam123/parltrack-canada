@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% from "_lobbying.html" import report_list, pager, pending, source_note, monthly_chart with context %}
+{% set page_width = 'max-w-3xl' %}
+
+{% block title %}{{ person.name if person else 'Lobbyist' }} · Lobbying | PolitiKit{% endblock %}
+
+{% block intro %}{% if person %}{{ person.name }}'s lobbying: {{ 'the clients they represent' if person.kind == 1 else 'the registrations they file' }} and every meeting they've reported since November 2021.{% else %}Lobbying records from the Commissioner of Lobbying.{% endif %}{% endblock %}
+
+{% block content %}
+<a href="{{ url_for('lobbying_page') }}" class="mb-3 inline-flex items-center gap-1 text-sm font-medium text-ink-600 hover:text-ink-900">&larr; Lobbying</a>
+
+{% if not person %}
+  {{ pending(lobby_status) }}
+{% else %}
+<article class="rise rounded-2xl bg-paper p-5 shadow-sm ring-1 ring-ink-200 sm:p-7">
+  <p class="text-xs font-bold uppercase tracking-[0.18em] text-maple-700">{{ 'Consultant lobbyist' if person.kind == 1 else 'Registrant (responsible officer)' }}</p>
+  <h2 class="mt-1 font-serif text-2xl font-semibold leading-tight text-ink-900 sm:text-3xl">{{ person.name }}</h2>
+  {% if person.kind == 1 and person.firm %}<p class="mt-1 text-sm text-ink-700">{{ person.firm }}</p>
+  {% elif person.position %}<p class="mt-1 text-sm text-ink-700">{{ person.position }}</p>{% endif %}
+  {% if person.kind != 1 %}<p class="mt-2 text-xs leading-relaxed text-ink-500">For companies and organizations, the most senior paid officer files the registration and the monthly reports, whoever attended the meeting.</p>{% endif %}
+
+  {% if person.offices %}
+  <div class="mt-4 rounded-lg border-l-4 border-maple-600 bg-maple-50 p-3 text-sm">
+    <p class="font-semibold text-ink-900">Former public office{{ '' if person.offices|length == 1 else 's' }}</p>
+    <ul class="mt-1 space-y-0.5 text-ink-700">
+      {% for o in person.offices %}<li>{{ o.title or 'Public office' }}{% if o.branch %}, {{ o.branch }}{% endif %}{% if o.institution %}, {{ o.institution }}{% endif %}{% if o.start or o.end_date %} ({{ o.start[:4] if o.start }}–{{ o.end_date[:4] if o.end_date }}){% endif %}{% if not o.title and o.details %}: {{ o.details }}{% endif %}</li>{% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+
+  <dl class="mt-5 grid grid-cols-3 gap-3 text-sm">
+    {% for label, value in (('Meetings this Parliament', person.reports_now), ('Since Nov 2021', person.reports), ('Active registrations', person.active_regs)) %}
+    <div class="rounded-lg bg-ink-50 p-3 ring-1 ring-inset ring-ink-200">
+      <dt class="text-xs font-medium text-ink-500">{{ label }}</dt>
+      <dd class="mt-0.5 font-serif text-2xl font-semibold tabular-nums text-ink-900">{{ value }}</dd>
+    </div>
+    {% endfor %}
+  </dl>
+  {% if person.reports %}{{ monthly_chart(person.monthly, 'Meetings reported by ' ~ person.name) }}{% endif %}
+</article>
+
+<section class="rise mt-4 rounded-2xl bg-paper p-5 shadow-sm ring-1 ring-ink-200 sm:p-7" aria-labelledby="clients-h">
+  <h2 id="clients-h" class="font-serif text-lg font-semibold text-ink-900">{{ 'Current clients' if person.kind == 1 else 'Registered for' }}</h2>
+  {% if person.clients %}
+  <ul class="mt-3 divide-y divide-ink-100">
+    {% for c in person.clients %}
+    <li class="flex items-baseline justify-between gap-3 py-2.5">
+      <div class="min-w-0">
+        <a href="{{ url_for('lobbying_org_page', num=c.num) }}" class="font-semibold text-ink-900 hover:text-maple-700">{{ c.name }}</a>
+        <p class="text-xs text-ink-500">Registered since {{ c.since|day }}</p>
+      </div>
+      <span class="shrink-0 text-xs tabular-nums text-ink-600">{{ c.reports }} meeting{{ '' if c.reports == 1 else 's' }}</span>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="mt-1 text-sm text-ink-600">No registration in effect right now.</p>
+  {% endif %}
+  {% if person.past_clients %}
+  <h3 class="mt-5 text-xs font-bold uppercase tracking-[0.18em] text-ink-500">Earlier, since November 2021</h3>
+  <ul class="mt-1 divide-y divide-ink-100">
+    {% for c in person.past_clients %}
+    <li class="flex items-baseline justify-between gap-3 py-2">
+      <a href="{{ url_for('lobbying_org_page', num=c.num) }}" class="min-w-0 text-sm text-ink-800 hover:text-maple-700">{{ c.name }}</a>
+      <span class="shrink-0 text-xs tabular-nums text-ink-500">{{ c.reports }} · last {{ c.last|day }}</span>
+    </li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+</section>
+
+<section class="rise mt-4 rounded-2xl bg-paper p-5 shadow-sm ring-1 ring-ink-200 sm:p-7" aria-labelledby="reports-h">
+  <h2 id="reports-h" class="font-serif text-lg font-semibold text-ink-900">Reported meetings</h2>
+  <div class="mt-4">
+    {% if reports %}{{ report_list(reports, mps, party_colours, show_registrant=false, current_session=current_session) }}
+    {% else %}<p class="text-sm text-ink-600">No meetings reported since November 2021.</p>{% endif %}
+  </div>
+  {{ pager(pages) }}
+</section>
+
+{{ source_note(lobby_meta, attribution, licence_url, open_data_url) }}
+{% endif %}
+{% endblock %}

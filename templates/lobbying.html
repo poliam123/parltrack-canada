@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+{% from "_lobbying.html" import report_list, pager, pending, source_note, bar_list, bar with context %}
+{% set page_width = 'max-w-4xl' %}
+
+{% block title %}{% if q %}{{ q }} · {% endif %}Lobbying | PolitiKit{% endblock %}
+
+{% block intro %}Who is lobbying the federal government, whom they meet and on what. Paid lobbyists must register, and must report every arranged meeting with ministers, MPs, senators, their senior staff and senior officials.{% endblock %}
+
+{% block content %}
+<form method="get" action="{{ url_for('lobbying_page') }}" role="search" class="rise mb-5 flex gap-2">
+  <label for="lq" class="sr-only">Search organizations and lobbyists</label>
+  <input id="lq" name="q" type="search" value="{{ q }}" maxlength="80" placeholder="Search an organization, company or lobbyist"
+         class="min-w-0 flex-1 rounded-lg border-0 bg-paper px-3 py-2.5 text-sm text-ink-900 shadow-sm ring-1 ring-inset ring-ink-200 placeholder:text-ink-400 focus:outline-none focus:ring-2 focus:ring-maple-600">
+  <button type="submit" class="rounded-lg bg-maple-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-maple-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink-800">Search</button>
+</form>
+
+{% if not ov %}
+  {{ pending(lobby_status) }}
+{% else %}
+
+  {% if found is not none %}
+  <section class="rise mb-6 rounded-2xl bg-paper p-5 shadow-sm ring-1 ring-ink-200" aria-labelledby="found-h">
+    <h2 id="found-h" class="font-serif text-lg font-semibold text-ink-900">Results for “{{ q }}”</h2>
+    {% if not found.orgs and not found.lobbyists %}
+    <p class="mt-1 text-sm text-ink-600">No organization or lobbyist matched. Try part of the name, like “hydro” or “bank”.</p>
+    {% endif %}
+    {% if found.orgs %}
+    <h3 class="mt-4 text-xs font-bold uppercase tracking-[0.18em] text-ink-500">Organizations</h3>
+    <ul class="mt-1 divide-y divide-ink-100">
+      {% for o in found.orgs %}
+      <li class="flex items-baseline justify-between gap-3 py-2.5">
+        <div class="min-w-0">
+          <a href="{{ url_for('lobbying_org_page', num=o.num) }}" class="font-semibold text-ink-900 hover:text-maple-700">{{ o.name }}</a>
+          <p class="text-xs text-ink-500">{{ o.kind_label }}{% if o.active_regs %} · registered now{% endif %}{% if o.last_date %} · last meeting {{ o.last_date|day }}{% endif %}</p>
+        </div>
+        <span class="shrink-0 text-xs tabular-nums text-ink-600">{{ o.reports_now }} this Parliament</span>
+      </li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+    {% if found.lobbyists %}
+    <h3 class="mt-4 text-xs font-bold uppercase tracking-[0.18em] text-ink-500">Lobbyists</h3>
+    <ul class="mt-1 divide-y divide-ink-100">
+      {% for p in found.lobbyists %}
+      <li class="flex items-baseline justify-between gap-3 py-2.5">
+        <div class="min-w-0">
+          <a href="{{ url_for('lobbying_lobbyist_page', num=p.num) }}" class="font-semibold text-ink-900 hover:text-maple-700">{{ p.name }}</a>
+          <p class="text-xs text-ink-500">{{ p.kind_label }}{% if p.firm %} · {{ p.firm }}{% endif %}</p>
+        </div>
+        <span class="shrink-0 text-xs tabular-nums text-ink-600">{{ p.reports_now }} this Parliament</span>
+      </li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+  </section>
+  {% endif %}
+
+  <dl class="rise mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
+    {% for label, value in (('Meetings reported this Parliament', ov.totals.reports), ('Organizations lobbying', ov.totals.orgs), ('Meetings with MPs', ov.totals.mp_reports), ('Active registrations', ov.totals.active_regs)) %}
+    <div class="rounded-2xl bg-paper p-4 shadow-sm ring-1 ring-ink-200">
+      <dt class="text-xs font-medium leading-snug text-ink-500">{{ label }}</dt>
+      <dd class="mt-1 font-serif text-2xl font-semibold tabular-nums text-ink-900">{{ '{:,}'.format(value) }}</dd>
+    </div>
+    {% endfor %}
+  </dl>
+
+  <h2 class="mb-3 flex items-center gap-2 text-xs font-bold uppercase tracking-[0.18em] text-maple-700">
+    <span class="h-px w-6 bg-maple-600" aria-hidden="true"></span>The last 90 days
+  </h2>
+  <div class="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-2">
+    {% call bar_list(ov.top_orgs, 'Most active organizations', 'No meetings reported.') %}
+      {% for o in ov.top_orgs %}{{ bar(('<a class="hover:text-maple-700 hover:underline" href="%s">%s</a>'|format(url_for('lobbying_org_page', num=o.num), o.name|e))|safe, o.n, o.width, 'meetings') }}{% endfor %}
+    {% endcall %}
+    {% call bar_list(ov.top_mps, 'MPs met most often', 'No meetings with MPs reported.') %}
+      {% for row in ov.top_mps %}{% set mp = mps.get(row.id) %}{% if mp %}{{ bar(('<span class="swatch mr-1.5 inline-block h-2 w-2 rounded-full" style="background:%s"></span><a class="hover:text-maple-700 hover:underline" href="%s">%s</a>'|format(party_colours.get(mp.party, '#d6d7da'), url_for('member_lobbying_page', pid=mp.id), mp.name|e))|safe, row.n, row.width, 'meetings') }}{% endif %}{% endfor %}
+    {% endcall %}
+    {% call bar_list(ov.top_bills, 'Bills named most often', 'No bills named in recent reports.') %}
+      {% for b in ov.top_bills %}{{ bar(('<a class="font-semibold hover:text-maple-700 hover:underline" href="%s">Bill %s</a>'|format(url_for('bill_detail', parl_session=b.session, number=b.number), b.number))|safe, b.orgs, b.width, 'organization' if b.orgs == 1 else 'organizations') }}{% endfor %}
+    {% endcall %}
+    {% call bar_list(ov.top_institutions, 'Most-lobbied institutions', 'No meetings reported.') %}
+      {% for i in ov.top_institutions %}{{ bar(i.name, i.n, i.width, 'meetings') }}{% endfor %}
+    {% endcall %}
+  </div>
+
+  <section class="rise rounded-2xl bg-paper p-5 shadow-sm ring-1 ring-ink-200 sm:p-6" aria-labelledby="latest-h">
+    <div class="flex flex-wrap items-baseline justify-between gap-2">
+      <h2 id="latest-h" class="font-serif text-lg font-semibold text-ink-900">Latest reported meetings</h2>
+      {% if ov.totals.latest %}<p class="text-xs text-ink-500">Most recent meeting: {{ ov.totals.latest|day }}</p>{% endif %}
+    </div>
+    <form method="get" action="{{ url_for('lobbying_page') }}" class="mt-3 flex flex-wrap items-end gap-3 text-sm" id="lobby-filter">
+      <label class="block min-w-[12rem] flex-1"><span class="mb-1 block text-xs font-medium text-ink-500">Subject</span>
+        <select name="subject" class="w-full rounded-md border-0 bg-ink-50 py-2 pl-2 pr-6 text-sm text-ink-900 ring-1 ring-inset ring-ink-200 focus:ring-2 focus:ring-maple-600">
+          <option value="">All subjects</option>
+          {% for s in subjects %}<option value="{{ s.code }}" {{ 'selected' if subject == s.code }}>{{ s.name }}</option>{% endfor %}
+        </select></label>
+      <label class="flex items-center gap-2 py-2 text-ink-800">
+        <input type="checkbox" name="who" value="mps" {{ 'checked' if who == 'mps' }} class="h-4 w-4 rounded border-ink-400 text-maple-600 focus:ring-maple-600">
+        Only meetings with MPs
+      </label>
+      <button type="submit" class="rounded-md bg-maple-600 px-4 py-2 text-sm font-semibold text-white hover:bg-maple-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink-800">Apply</button>
+      {% if subject or who %}<a href="{{ url_for('lobbying_page') }}" class="py-2 text-sm text-ink-600 underline decoration-maple-600 underline-offset-2 hover:text-ink-900">Clear</a>{% endif %}
+    </form>
+    <div class="mt-4">
+      {% if reports %}{{ report_list(reports, mps, party_colours, current_session=current_session) }}
+      {% else %}<p class="text-sm text-ink-600">No meetings match those filters.</p>{% endif %}
+    </div>
+    {{ pager(pages) }}
+  </section>
+
+  {{ source_note(lobby_meta, attribution, licence_url, open_data_url) }}
+  <script>
+    document.querySelectorAll('#lobby-filter select, #lobby-filter input[type=checkbox]').forEach(function (el) {
+      el.addEventListener('change', function () { el.form.submit(); });
+    });
+  </script>
+{% endif %}
+{% endblock %}
